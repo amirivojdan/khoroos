@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# V-JEPA2 chicken action recognition: downloaded dataset & training artifacts
+notebooks/dataset/
+notebooks/checkpoints/
