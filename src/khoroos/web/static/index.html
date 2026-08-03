@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khoroos — Poultry Welfare Monitoring</title>
+<link rel="icon" href="/khoroos.png" type="image/png">
+<link rel="stylesheet" href="/styles.css?v=responsive-32">
+</head>
+<body data-screen="select" data-select-view="landing">
+
+<header class="topbar">
+  <div class="brand">
+    <img class="brand-mark" src="/khoroos.png" alt="" width="284" height="352">
+    <span class="brand-name">Khoroos</span>
+    <span class="brand-sub">poultry welfare analysis</span>
+  </div>
+  <nav class="site-nav" aria-label="Project links">
+    <a href="https://github.com/amirivojdan/khoroos#readme" target="_blank" rel="noopener">Documentation</a>
+    <a href="https://github.com/amirivojdan/khoroos" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/amirivojdan/khoroos/tree/main/notebooks" target="_blank" rel="noopener">Examples</a>
+    <a href="https://github.com/amirivojdan/khoroos/blob/main/notebooks/vjepa2_chicken_action_recognition.ipynb" target="_blank" rel="noopener">Datasets</a>
+  </nav>
+  <div class="topbar-right">
+    <span id="device-badge" class="badge" hidden></span>
+    <button id="theme-toggle" class="btn btn-ghost" type="button" aria-label="Toggle colour theme">◐</button>
+    <button id="new-analysis" class="btn btn-ghost" type="button" hidden>New analysis</button>
+  </div>
+</header>
+
+<main>
+
+<!-- ==================== 1. SELECT ==================== -->
+<section id="screen-select" class="screen">
+  <div id="select-landing" class="select-landing">
+    <img
+      class="hero-art"
+      src="/Khoroos-transparent.png"
+      alt="Pixel-art Khoroos rooster"
+      width="815"
+      height="991"
+    >
+    <div class="hero-copy">
+      <div class="hero-heading">
+        <div class="hero-title-line">
+          <h1>Khoroos</h1>
+          <span class="hero-name-note">(Persian for “rooster”, pronounced kho-ROOS)</span>
+        </div>
+        <p class="hero-subtitle">An open toolkit for poultry welfare analysis</p>
+      </div>
+      <p class="lede">
+        Khoroos turns poultry-house footage into individual bird trajectories, behavior timelines, and quantitative welfare indicators. Developed at the
+        <a href="https://www.ut-smartagriculture.com/" target="_blank" rel="noopener">
+          UT Smart Agriculture Lab</a>.
+      </p>
+      <ul class="hero-features" aria-label="Khoroos capabilities">
+        <li>Precision Livestock Farming</li>
+        <li>Livestock Video Analytics</li>
+        <li>Automated Welfare Assessment</li>
+      </ul>
+      <div class="hero-actions">
+        <button id="getting-started" class="btn btn-primary landing-cta" type="button">
+          Getting Started <span aria-hidden="true">→</span>
+        </button>
+        <a class="btn landing-secondary" href="https://github.com/amirivojdan/khoroos"
+           target="_blank" rel="noopener">View on GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
+  </div>
+
+  <div id="select-setup" hidden>
+    <button id="setup-back" class="btn btn-small setup-back" type="button">
+      ← About Khoroos
+    </button>
+
+    <div id="model-warning" class="notice notice-warn" hidden></div>
+
+    <nav class="select-stepper" aria-label="Analysis setup progress">
+      <span id="step-video" class="select-step is-active" aria-current="step">
+        <span class="step-number">01</span>
+        <span>Select video</span>
+      </span>
+      <span class="step-connector" aria-hidden="true"></span>
+      <span id="step-options" class="select-step">
+        <span class="step-number">02</span>
+        <span>Processing options</span>
+      </span>
+    </nav>
+
+    <div id="select-stage-file" class="select-stage">
+      <div class="card">
+        <h2>1. Choose a video</h2>
+
+        <label id="dropzone" class="dropzone" for="file-input">
+          <input id="file-input" type="file" accept="video/*" hidden>
+          <span class="dropzone-icon" aria-hidden="true">⬆</span>
+          <span class="dropzone-title">Drop a video or select a video file</span>
+          <span class="dropzone-hint">MP4, MOV, AVI, MKV</span>
+        </label>
+      </div>
+    </div>
+
+    <div id="select-stage-options" class="select-stage" tabindex="-1" hidden>
+      <div class="card">
+        <div class="stage-card-head">
+          <h2>2. Set the processing options</h2>
+          <button id="change-video" class="btn btn-small" type="button">
+            ← Choose another video
+          </button>
+        </div>
+
+        <div id="selection" class="selection" hidden>
+          <span class="selection-label">Selected</span>
+          <strong id="selection-name"></strong>
+          <span id="selection-size" class="muted"></span>
+        </div>
+
+        <fieldset class="field">
+          <legend>Detail level</legend>
+          <div id="preset-options" class="preset-options"></div>
+        </fieldset>
+
+      <details class="advanced">
+        <summary>Advanced settings</summary>
+        <div class="field-row">
+          <label for="opt-max-seconds">Analyse only the first (seconds)</label>
+          <input id="opt-max-seconds" type="number" min="1" step="1" placeholder="whole video">
+        </div>
+        <div class="field-row">
+          <label for="opt-min-conf">Minimum action confidence</label>
+          <input id="opt-min-conf" type="number" min="0" max="1" step="0.05" value="0.5">
+          <span class="hint">Below this, a clip is reported as “uncertain” rather than guessed.</span>
+        </div>
+        <div class="field-row">
+          <label for="opt-det-conf">Detector confidence</label>
+          <input id="opt-det-conf" type="number" min="0.05" max="0.95" step="0.05" value="0.3">
+        </div>
+
+        <fieldset class="field">
+          <legend>Batch sizes</legend>
+          <p class="hint">
+            How much work each model does per forward pass. Larger batches run faster but
+            need more memory; if a run fails with an out-of-memory error, lower these. Leave
+            blank to use the detail level's own values.
+          </p>
+          <div class="field-row">
+            <label for="opt-det-batch">Object detection (frames per batch)</label>
+            <input id="opt-det-batch" type="number" min="1" step="1">
+          </div>
+          <div class="field-row">
+            <label for="opt-act-batch">Action recognition (clips per batch)</label>
+            <input id="opt-act-batch" type="number" min="1" step="1">
+            <span class="hint">Each clip is 64 frames, so this drives peak memory hardest.</span>
+          </div>
+        </fieldset>
+
+        <div class="field-row field-check">
+          <input id="opt-overlay" type="checkbox">
+          <label for="opt-overlay">Also render an annotated video (slower)</label>
+        </div>
+
+        <fieldset class="field">
+          <legend>Alert thresholds</legend>
+          <p class="hint">
+            Khoroos flags indicators outside these values. They are your judgement to set —
+            the defaults are starting points, not a standard.
+          </p>
+          <div id="threshold-options"></div>
+        </fieldset>
+      </details>
+
+        <button id="start-btn" class="btn btn-primary btn-block" type="button" disabled>
+          Start analysis
+        </button>
+        <p id="start-error" class="notice notice-error" hidden></p>
+      </div>
+    </div>
+
+    <div id="recent-jobs" class="card select-stage" hidden>
+      <h2>Recent analyses</h2>
+      <div id="recent-list" class="recent-list"></div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ==================== 2. RUNNING ==================== -->
+<section id="screen-running" class="screen" hidden>
+  <div class="card running-card">
+    <h1 id="running-title">Analysing</h1>
+    <p id="running-file" class="muted"></p>
+
+    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+      <div id="progress-fill" class="progress-fill"></div>
+    </div>
+    <div class="progress-meta">
+      <span id="progress-pct">0%</span>
+      <span id="progress-eta" class="muted"></span>
+    </div>
+
+    <ol id="stage-list" class="stages"></ol>
+
+    <p id="running-message" class="running-message"></p>
+
+    <button id="cancel-btn" class="btn btn-ghost" type="button">Cancel</button>
+  </div>
+</section>
+
+<!-- ==================== 3. RESULTS ==================== -->
+<section id="screen-results" class="screen" hidden>
+
+  <div id="result-warnings"></div>
+
+  <!-- KPI row -->
+  <div id="kpi-row" class="kpi-row"></div>
+
+  <div id="alerts" class="alerts"></div>
+
+  <!-- Player + timeline -->
+  <div class="card player-card">
+    <div class="player-head">
+      <h2>Video &amp; behaviour timeline</h2>
+      <div class="player-controls">
+        <label class="switch" id="tracks-switch-wrap">
+          <input id="tracks-switch" type="checkbox" checked>
+          <span>Show tracks</span>
+        </label>
+        <label class="switch" hidden id="overlay-switch-wrap">
+          <input id="overlay-switch" type="checkbox">
+          <span>Annotated</span>
+        </label>
+        <span id="focus-chip" class="chip" hidden></span>
+      </div>
+    </div>
+
+    <div class="player-stage">
+      <video id="player" class="player" controls preload="metadata"></video>
+      <canvas id="player-overlay" class="player-overlay" aria-hidden="true"></canvas>
+    </div>
+    <p class="hint player-hint">
+      Fading dots show each bird's recent path. A coloured box appears only while an action
+      was confidently recognised; its label and confidence describe that result. Windows the
+      model was unsure about are left unmarked here and counted as uncertain time in the
+      timeline below. Click a bird's row to follow just that one.
+    </p>
+
+    <div class="timeline-block">
+      <div class="timeline-title">
+        <h3>Flock behaviour over time</h3>
+        <span class="hint">Click anywhere on the timeline to jump the video there.</span>
+      </div>
+      <div id="legend-groups" class="legend"></div>
+      <canvas id="timeline-stack" class="timeline-canvas" height="90"></canvas>
+
+      <div class="timeline-title">
+        <h3>Individual birds</h3>
+        <span class="hint">One row per tracked bird. Click a row to follow that bird.</span>
+      </div>
+      <canvas id="timeline-birds" class="timeline-canvas" height="220"></canvas>
+      <div id="timeline-tooltip" class="tooltip" hidden></div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="chart-grid">
+    <div class="card">
+      <div class="card-head">
+        <h2>Time budget</h2>
+        <button class="btn btn-small btn-ghost" data-toggle-table="budget">Table</button>
+      </div>
+      <p class="card-sub">Share of observed bird-time in each behaviour.</p>
+      <div id="chart-budget" class="chart"></div>
+      <div id="table-budget" class="table-wrap" hidden></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Birds detected over time</h2></div>
+      <p class="card-sub">Count of birds visible in each analysed frame.</p>
+      <div id="chart-population" class="chart"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Where activity happens</h2></div>
+      <p class="card-sub">Observations per area of the house. Denser areas are darker.</p>
+      <div id="chart-spatial" class="chart"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Behaviour bouts</h2></div>
+      <p class="card-sub">A bout is an unbroken run of one behaviour by one bird.</p>
+      <div id="chart-bouts" class="chart"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Model reliability</h2>
+    </div>
+    <p class="card-sub">
+      Held-out test-set performance for each behaviour. Figures from classes the model
+      recognises poorly should be treated with caution, and never drive a management
+      decision on their own.
+    </p>
+    <div id="table-reliability" class="table-wrap"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Export</h2></div>
+    <p class="card-sub">Everything below covers the full analysis, not just what is on screen.</p>
+    <div id="export-links" class="export-links"></div>
+    <details class="advanced">
+      <summary>Analysis settings used</summary>
+      <div id="params-dump" class="table-wrap"></div>
+    </details>
+  </div>
+
+  <p class="footnote">
+    Khoroos reports behavioural indicators and flags values outside the thresholds you set.
+    It does not diagnose welfare. Interpret these figures alongside on-farm observation.
+  </p>
+</section>
+
+</main>
+
+<script src="/app.js?v=responsive-10"></script>
+</body>
+</html>

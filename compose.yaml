@@ -1,0 +1,21 @@
+services:
+  khoroos:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: khoroos:local
+    gpus: all
+    ports:
+      - "${KHOROOS_PORT:-8000}:8000"
+    environment:
+      HF_TOKEN: "${HF_TOKEN:-}"
+      HF_HOME: /var/lib/khoroos/huggingface
+      KHOROOS_CACHE_DIR: /var/lib/khoroos
+      KHOROOS_DEVICE: cuda
+      KHOROOS_PREFETCH_MODELS: "${KHOROOS_PREFETCH_MODELS:-1}"
+    volumes:
+      - khoroos-data:/var/lib/khoroos
+    restart: unless-stopped
+
+volumes:
+  khoroos-data:

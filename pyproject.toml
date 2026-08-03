@@ -2,12 +2,67 @@
 name = "khoroos"
 version = "0.1.0"
 description = "An open toolkit for poultry welfare monitoring."
+readme = "README.md"
 authors = [
     { name = "Ahmad Amirivojdan", email = "amirivojdan@gmail.com" }
 ]
+keywords = ["poultry", "welfare", "animal-science", "action-recognition", "computer-vision"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "torch>=2.4",
+    "torchvision>=0.19",
+    "transformers>=4.53.2",
+    "torchcodec>=0.1",
+    "av>=12",
+    "numpy>=2.1",
+    "scipy>=1.13",
+    "pillow>=10",
+    "typer>=0.12",
+    "huggingface-hub>=0.25",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+]
+
+[project.optional-dependencies]
+web = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+khoroos = "khoroos.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/amirivojdan/khoroos"
+Issues = "https://github.com/amirivojdan/khoroos/issues"
 
 [build-system]
 requires = ["uv_build>=0.9.11,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test fixtures read better on one line than wrapped.
+"tests/*" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
