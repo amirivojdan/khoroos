@@ -279,6 +279,18 @@ uv run ruff check src/ tests/
 The test suite drives the full pipeline with stub models over a generated video, so it runs
 anywhere in a few seconds.
 
+### Documentation
+
+The documentation site is built with MkDocs:
+
+```bash
+uv sync --extra docs
+uv run mkdocs serve
+```
+
+Open `http://127.0.0.1:8000` while the development server is running. To perform the same
+strict build used for validation, run `uv run mkdocs build --strict`.
+
 ### Architecture
 
 The command line and the web UI are two surfaces over one library. Neither owns any analysis

@@ -39,6 +39,10 @@ dev = [
     "pytest>=8",
     "ruff>=0.6",
 ]
+docs = [
+    "mkdocs-material>=9.6",
+    "mkdocstrings[python]>=0.29",
+]
 
 [project.scripts]
 khoroos = "khoroos.cli:app"

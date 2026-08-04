@@ -64,8 +64,8 @@ def test_static_index_is_served(client):
     assert "Khoroos" in response.text
     assert 'class="player-stage"' in response.text
     assert 'id="player-overlay"' in response.text
-    assert "styles.css?v=responsive-32" in response.text
-    assert "app.js?v=responsive-10" in response.text
+    assert "styles.css?v=responsive-33" in response.text
+    assert "app.js?v=responsive-12" in response.text
 
 
 def test_select_screen_uses_a_single_video_dropzone(client):

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Khoroos — Poultry Welfare Monitoring</title>
 <link rel="icon" href="/khoroos.png" type="image/png">
-<link rel="stylesheet" href="/styles.css?v=responsive-32">
+  <link rel="stylesheet" href="/styles.css?v=responsive-33">
 </head>
 <body data-screen="select" data-select-view="landing">
 
@@ -209,12 +209,8 @@
 <!-- ==================== 3. RESULTS ==================== -->
 <section id="screen-results" class="screen" hidden>
 
-  <div id="result-warnings"></div>
-
   <!-- KPI row -->
   <div id="kpi-row" class="kpi-row"></div>
-
-  <div id="alerts" class="alerts"></div>
 
   <!-- Player + timeline -->
   <div class="card player-card">
@@ -293,18 +289,6 @@
   </div>
 
   <div class="card">
-    <div class="card-head">
-      <h2>Model reliability</h2>
-    </div>
-    <p class="card-sub">
-      Held-out test-set performance for each behaviour. Figures from classes the model
-      recognises poorly should be treated with caution, and never drive a management
-      decision on their own.
-    </p>
-    <div id="table-reliability" class="table-wrap"></div>
-  </div>
-
-  <div class="card">
     <div class="card-head"><h2>Export</h2></div>
     <p class="card-sub">Everything below covers the full analysis, not just what is on screen.</p>
     <div id="export-links" class="export-links"></div>
@@ -315,13 +299,13 @@
   </div>
 
   <p class="footnote">
-    Khoroos reports behavioural indicators and flags values outside the thresholds you set.
-    It does not diagnose welfare. Interpret these figures alongside on-farm observation.
+    Khoroos reports behavioural indicators; it does not diagnose welfare. Interpret these
+    figures alongside on-farm observation.
   </p>
 </section>
 
 </main>
 
-<script src="/app.js?v=responsive-10"></script>
+<script src="/app.js?v=responsive-12"></script>
 </body>
 </html>

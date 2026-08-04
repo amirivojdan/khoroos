@@ -490,9 +490,7 @@ async function loadResult(jobId) {
 
 function renderResults(result) {
   const metrics = result.metrics || {};
-  renderWarnings(result);
   renderKpis(result, metrics);
-  renderAlerts(metrics.alerts || []);
   setupPlayer(result);
   renderLegend();
   drawStackTimeline();
@@ -501,16 +499,8 @@ function renderResults(result) {
   renderPopulation(metrics);
   renderSpatial(metrics, result);
   renderBouts(metrics);
-  renderReliability(result);
   renderExports();
   renderParams(result);
-}
-
-function renderWarnings(result) {
-  const container = $('#result-warnings');
-  container.innerHTML = (result.warnings || [])
-    .map((text) => `<div class="notice notice-info">⚠ <span>${escapeHtml(text)}</span></div>`)
-    .join('');
 }
 
 function escapeHtml(text) {
@@ -523,7 +513,6 @@ function renderKpis(result, metrics) {
   const indicators = metrics.indicators || {};
   const budget = metrics.time_budget || {};
   const population = metrics.population || {};
-  const thresholds = metrics.thresholds || {};
 
   const tiles = [
     {
@@ -534,26 +523,22 @@ function renderKpis(result, metrics) {
     {
       label: 'Comfort behaviour',
       value: fmtPct(indicators.comfort_index || 0),
-      note: `target ≥ ${fmtPct(thresholds.min_comfort_share || 0)}`,
-      meter: indicators.comfort_index, target: thresholds.min_comfort_share, higherBetter: true,
+      note: 'share of observed bird-time',
     },
     {
       label: 'Locomotion',
       value: fmtPct(indicators.locomotion_score || 0),
-      note: `target ≥ ${fmtPct(thresholds.min_locomotion_share || 0)}`,
-      meter: indicators.locomotion_score, target: thresholds.min_locomotion_share, higherBetter: true,
+      note: 'share of observed bird-time',
     },
     {
       label: 'Inactive',
       value: fmtPct(indicators.inactivity_ratio || 0),
-      note: `limit ≤ ${fmtPct(thresholds.max_inactive_share || 0)}`,
-      meter: indicators.inactivity_ratio, target: thresholds.max_inactive_share, higherBetter: false,
+      note: 'share of observed bird-time',
     },
     {
       label: 'Feeding & drinking',
       value: fmtPct(indicators.ingestive_share || 0),
-      note: `target ≥ ${fmtPct(thresholds.min_ingestive_share || 0)}`,
-      meter: indicators.ingestive_share, target: thresholds.min_ingestive_share, higherBetter: true,
+      note: 'share of observed bird-time',
     },
     {
       label: 'Observed',
@@ -563,28 +548,10 @@ function renderKpis(result, metrics) {
   ];
 
   $('#kpi-row').innerHTML = tiles.map((tile) => {
-    let meter = '';
-    if (tile.meter !== undefined && tile.target) {
-      const ok = tile.higherBetter ? tile.meter >= tile.target : tile.meter <= tile.target;
-      const width = Math.min(100, (tile.meter / Math.max(tile.target * 2, 1e-6)) * 100);
-      const colour = ok ? 'var(--status-good)' : 'var(--status-warning)';
-      meter = `<div class="kpi-meter"><span style="width:${width}%;background:${colour}"></span></div>`;
-    }
     return `<div class="kpi">
       <div class="kpi-label">${tile.label}</div>
       <div class="kpi-value">${tile.value}</div>
       <div class="kpi-note">${tile.note}</div>
-      ${meter}
-    </div>`;
-  }).join('');
-}
-
-function renderAlerts(alerts) {
-  $('#alerts').innerHTML = alerts.map((alert) => {
-    const isWarning = alert.level === 'warning';
-    return `<div class="alert ${isWarning ? 'alert-warning' : 'alert-info'}">
-      <span class="alert-icon" aria-hidden="true">${isWarning ? '⚠' : 'ℹ'}</span>
-      <span><strong>${isWarning ? 'Warning' : 'Note'}:</strong> ${escapeHtml(alert.message)}</span>
     </div>`;
   }).join('');
 }
@@ -1552,43 +1519,6 @@ function renderBouts(metrics) {
 
   container.innerHTML = '';
   container.appendChild(svg);
-}
-
-function renderReliability(result) {
-  const f1 = result.model.per_class_f1 || {};
-  const support = result.model.per_class_support || {};
-  const classes = result.model.classes || [];
-
-  if (!Object.keys(f1).length) {
-    $('#table-reliability').innerHTML =
-      `<p class="hint">No held-out evaluation has been recorded for this model, so per-class
-       reliability is unknown. Run the evaluation notebook and save a
-       <code>model_card.json</code> beside the checkpoint to populate this table.</p>`;
-    return;
-  }
-
-  const rows = classes
-    .filter((name) => name in f1)
-    .sort((a, b) => f1[b] - f1[a])
-    .map((name) => {
-      const score = f1[name];
-      const status = score >= 0.8 ? 'good' : score >= 0.5 ? 'warning' : 'critical';
-      const icon = score >= 0.8 ? '●' : score >= 0.5 ? '▲' : '■';
-      const word = score >= 0.8 ? 'Strong' : score >= 0.5 ? 'Moderate' : 'Weak';
-      return `<tr>
-        <td><span class="swatch-cell">
-          <span class="legend-swatch" style="background:${colourFor(name)}"></span>
-          ${prettyLabel(name)}</span></td>
-        <td class="num">${score.toFixed(2)}</td>
-        <td class="num">${support[name] ?? '—'}</td>
-        <td><span style="color:var(--status-${status})">${icon}</span> ${word}</td>
-      </tr>`;
-    }).join('');
-
-  $('#table-reliability').innerHTML = `<table>
-    <thead><tr><th>Behaviour</th><th class="num">F1</th>
-    <th class="num">Test clips</th><th>Reliability</th></tr></thead>
-    <tbody>${rows}</tbody></table>`;
 }
 
 function renderExports() {
