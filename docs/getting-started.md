@@ -18,17 +18,16 @@ python -m pip install ".[web]"
 ```
 
 The default [detector](https://huggingface.co/amirivojdan/chicken_rtdetrv2) and
-[action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action) are private.
-Authenticate with an account that has read access to both, then download the weights:
+[action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action) are public.
+Download the weights before your first analysis; no login is required:
 
 ```bash
-hf auth login
 khoroos models download
 khoroos models status
 ```
 
-`HF_TOKEN` can be used instead of interactive login. Downloads are cached per repository
-and reused offline. Old notebook checkpoint folders are not searched.
+Downloads are cached per repository and reused offline. Old notebook checkpoint folders
+are not searched.
 
 ## Verify the environment
 

@@ -12,16 +12,16 @@ The Compose service requires:
 - An NVIDIA driver compatible with CUDA 13 (R580 or newer; see
   [NVIDIA's compatibility guide](https://docs.nvidia.com/deploy/cuda-compatibility/)).
 - The [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), configured for Docker.
-- A Hugging Face token with read access to
-  [the detector](https://huggingface.co/amirivojdan/chicken_rtdetrv2) and
-  [the action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action).
+
+The default [detector](https://huggingface.co/amirivojdan/chicken_rtdetrv2) and
+[action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action) are public.
+No Hugging Face token is required.
 
 ## Start the web interface
 
 From the repository root:
 
 ```bash
-export HF_TOKEN=hf_your_read_token
 docker compose up --build -d
 docker compose logs -f khoroos
 ```
@@ -83,8 +83,9 @@ The example above uses the managed volume for writes.
 
 ## Authentication and startup options
 
-`HF_TOKEN` is passed at runtime. Alternatively, mount a token file readable by the container
-user and set `HF_TOKEN_FILE`:
+Authentication is optional for the default public models. For private replacement models,
+pass `HF_TOKEN` at runtime, or mount a token file readable by the container user and set
+`HF_TOKEN_FILE`:
 
 ```bash
 docker compose run --rm --no-deps \
@@ -121,7 +122,8 @@ docker run --rm khoroos:local python -c "import torchcodec; print(torchcodec.__v
 ```
 
 - **GPU device-driver error:** check the host driver and NVIDIA Container Toolkit setup.
-- **401 or repository not found:** confirm the token can read both private model repositories.
+- **401 or repository not found:** check the configured repository IDs. If using private
+  replacements, confirm the token has read access; remove stale credentials for public access.
 - **Permission denied:** check bind-mount permissions for UID/GID 10001.
 - **Out of GPU memory:** reduce the action batch size and run one analysis at a time.
 - **Unhealthy during startup:** inspect `docker compose logs khoroos`; downloads may still be

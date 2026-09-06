@@ -36,9 +36,12 @@ Boolean settings accept values supported by Pydantic settings, such as `true` an
 
 ## Model sources
 
-By default, both models come from the private Hugging Face repositories listed above.
-Run `hf auth login` or set `HF_TOKEN` with read access, then run `khoroos models download`.
+By default, both models come from the public Hugging Face repositories listed above.
+Run `khoroos models download`; no login or token is required for these models.
 `khoroos models status` shows the checkpoint paths that inference will use.
+
+If you select a private replacement repository, authenticate with `hf auth login` or set
+`HF_TOKEN` with read access to that repository.
 
 Hub snapshots are cached under `KHOROOS_CACHE_DIR/weights`, separated by repository and
 revision. A cached checkpoint is reused offline. Changing a repository setting selects that

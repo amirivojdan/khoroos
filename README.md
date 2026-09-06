@@ -2,11 +2,25 @@
   <img src="khoroos_banner.png" alt="Khoroos: poultry behavior analysis" width="100%">
 </p>
 
-Khoroos is an open research toolkit for video-based poultry behavior analysis. It turns poultry-house footage into individual bird trajectories, behavior timelines, and quantitative welfare statistics.
+Khoroos turns poultry videos into bird tracks, behavior timelines, and descriptive statistics.
+Use it to measure how observed birds spend their time, compare activity across a recording,
+and export data for further analysis.
 
 Developed at the [UT Smart Agriculture Lab](https://www.ut-smartagriculture.com/).
 
-## Install
+## Features
+
+- **Detection and tracking:** locate chickens and follow their trajectories across frames.
+- **Behavior recognition:** classify single-bird clips into 15 behaviors, or select a subset
+  such as feeding and drinking.
+- **Descriptive statistics:** time budgets, behavior bouts, detection counts, spatial summaries,
+  and per-track measurements.
+- **Interactive review:** inspect tracks and behavior timelines alongside the video in a browser.
+- **Exports:** save JSON, CSV tables, and an optional annotated video.
+- **Replaceable components:** bring your own detector, classifier, tracker, or statistics
+  functions. Convert bounding-box annotations between YOLO and COCO formats.
+
+## Get started
 
 Requires Python 3.12+ and FFmpeg. A GPU is recommended for inference.
 
@@ -16,60 +30,56 @@ cd khoroos
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install ".[web]"
-```
-
-Both default models are **private**. Your Hugging Face account needs read access to:
-
-| Model | Repository |
-| --- | --- |
-| Chicken detector | [amirivojdan/chicken_rtdetrv2](https://huggingface.co/amirivojdan/chicken_rtdetrv2) |
-| 15-class action classifier | [amirivojdan/chicken_vjepa2_action](https://huggingface.co/amirivojdan/chicken_vjepa2_action) |
-
-Authenticate and download the weights:
-
-```bash
-hf auth login
 khoroos models download
-khoroos models status
-```
-
-You can also authenticate with `HF_TOKEN`. Downloads are cached per repository and reused
-offline. Khoroos does not search the old `notebooks/checkpoints/` folders.
-
-## Analyze a video
-
-Start the web interface:
-
-```bash
 khoroos ui
 ```
 
-Open `http://127.0.0.1:8000`, select a video, and run an analysis. The results show tracks,
-a behavior timeline, and downloadable statistics.
+The default models are public; no Hugging Face login is required. Downloads are cached for
+later runs, including offline use.
 
-Or use the command line:
+Open `http://127.0.0.1:8000`, select a video, choose a detail level, and start the analysis.
+Use the timeline to seek through the recording, select a track to follow one bird, and download
+the results when the run finishes.
+
+### Docker
+
+With Docker and the NVIDIA Container Toolkit installed:
 
 ```bash
-khoroos analyze farm.mp4 -o results/
+docker compose up --build
 ```
 
-Common options:
+Open `http://localhost:8000`. Startup downloads the models automatically and reuses them on
+later starts. Model files and results persist in a volume; the web job list resets on restart.
+See the [Docker guide](docs/guide/docker.md) for requirements and storage details.
+
+## Command line
+
+Start with a short section of video:
 
 ```bash
-# Analyze the first minute.
 khoroos analyze farm.mp4 -o results/ --max-seconds 60
+```
 
-# Use denser sampling and save an annotated video.
-khoroos analyze farm.mp4 -o results/ --preset thorough --overlay
+Analyze a full recording and save an annotated video:
 
-# Select the behavior classes to report.
+```bash
+khoroos analyze farm.mp4 -o results/ --overlay
+```
+
+Report selected behaviors:
+
+```bash
 khoroos analyze farm.mp4 -o results/ --set action_classes=feeding,drinking
 ```
 
-The default preset is `balanced`; `fast` samples less often and `thorough` samples more often.
-If GPU memory runs out, reduce `--action-batch-size` first.
+Choose `--preset fast`, `balanced` (default), or `thorough` to adjust sampling detail.
+If GPU memory runs out, reduce `--action-batch-size` first. See the
+[CLI guide](docs/guide/command-line.md) for all options.
 
-### Python
+## Python
+
+Analyze a video directly:
 
 ```python
 from khoroos import analyze_video
@@ -78,50 +88,49 @@ result = analyze_video("farm.mp4", preset="balanced")
 print(result.metrics["time_budget"])
 ```
 
-Use `AnalysisRunner` to reuse models across videos and save exports. See the
-[Python guide](docs/guide/python-api.md).
+Reuse the models across recordings and save each export bundle:
 
-### Docker
+```python
+from pathlib import Path
+from khoroos import AnalysisRunner
 
-With Docker and the NVIDIA Container Toolkit installed:
-
-```bash
-export HF_TOKEN=hf_your_read_token
-docker compose up --build
+runner = AnalysisRunner()
+for video in Path("videos").glob("*.mp4"):
+    runner.run(video, output_dir=Path("results") / video.stem)
 ```
 
-Open `http://localhost:8000`. Models and results persist in the `khoroos-data` volume.
-The web job list is reset on restart.
-See the [Docker guide](docs/guide/docker.md) for host requirements, batch runs, and troubleshooting.
+See the [Python guide](docs/guide/python-api.md) for parameters and progress callbacks.
 
-## Outputs
+## Results
+
+Each exported analysis includes:
 
 | File | Contents |
 | --- | --- |
 | `result.json` | Tracks, predictions, run parameters, and metadata |
-| `metrics.json` | Time budgets, groups, bouts, population counts, spatial summaries, and timelines |
+| `metrics.json` | Behavior budgets, bouts, detection counts, spatial summaries, and timelines |
 | `predictions.csv` | One row per classified clip |
 | `time_budget.csv` | Duration and proportion per behavior |
 | `per_bird.csv` | Statistics per track |
+| `annotated.mp4` | Video with boxes and labels, when `--overlay` is enabled |
 
-These are model-derived measurements. Uncertain predictions are reported separately; missed
-detections and identity switches can affect track summaries. See [Outputs](docs/guide/outputs.md)
-for field definitions and duration calculations.
+Statistics describe model-assigned labels. Uncertain predictions are reported separately,
+and track IDs represent trajectories rather than verified animal identities.
+See [Outputs](docs/guide/outputs.md) for field definitions and duration calculations.
 
-## Customize
+## Extend Khoroos
 
-Subclass `Detector`, `VideoClassifier`, or `Tracker` and pass your implementation to
-`VideoAnalyzer`. `PipelineComponents` supplies the tracker, video reader, cropper, and metrics
-functions. YOLO and COCO bounding-box codecs are available in `khoroos.annotations`.
+Subclass `Detector`, `VideoClassifier`, or `Tracker` to use your own algorithms.
+`VideoAnalyzer` accepts custom models, and `PipelineComponents` configures the reader, tracker,
+cropper, and metrics. Class labels and behavior groups are configurable.
 
-The [extension guide](docs/guide/extending.md) covers the required methods and working examples.
-The [configuration guide](docs/guide/configuration.md) covers model repositories, devices,
-cache paths, and analysis parameters.
+Follow the [extension guide](docs/guide/extending.md) for working examples, or the
+[configuration guide](docs/guide/configuration.md) for devices, model sources, and cache paths.
 
 ## Development
 
 ```bash
-uv sync --extra web --extra dev --extra docs
+uv sync --locked --extra web --extra dev --extra docs
 uv run pytest
 uv run ruff check src tests
 uv run mkdocs serve
@@ -129,9 +138,9 @@ uv run mkdocs serve
 
 Tests use stub models and generated videos; no model download is needed.
 
-## Data and training
+## Resources and licenses
 
-- [ChickenAct dataset](https://zenodo.org/records/20672799)
-- [Action-model training notebook](notebooks/vjepa2_chicken_action_recognition.ipynb)
 - [Documentation](docs/index.md)
-- [PolyForm Noncommercial License 1.0.0](LICENSE)
+- [ChickenAct dataset](https://zenodo.org/records/20672799) and [training notebook](notebooks/vjepa2_chicken_action_recognition.ipynb)
+- Public models: [chicken detector](https://huggingface.co/amirivojdan/chicken_rtdetrv2) and [action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action), licensed under CC BY-NC-SA 4.0.
+- Code: [PolyForm Noncommercial License 1.0.0](LICENSE).
