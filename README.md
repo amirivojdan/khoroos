@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="khoroos_banner.png" alt="Khoroos: poultry behavior analysis" width="100%">
+  <img src="https://raw.githubusercontent.com/amirivojdan/khoroos/main/khoroos_banner.png" alt="Khoroos: poultry behavior analysis" width="100%">
 </p>
 
 Khoroos turns poultry videos into bird tracks, behavior timelines, and descriptive statistics.
@@ -51,7 +51,7 @@ docker compose up --build
 
 Open `http://localhost:8000`. Startup downloads the models automatically and reuses them on
 later starts. Model files and results persist in a volume; the web job list resets on restart.
-See the [Docker guide](docs/guide/docker.md) for requirements and storage details.
+See the [Docker guide](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/docker.md) for requirements and storage details.
 
 ## Command line
 
@@ -75,7 +75,7 @@ khoroos analyze farm.mp4 -o results/ --set action_classes=feeding,drinking
 
 Choose `--preset fast`, `balanced` (default), or `thorough` to adjust sampling detail.
 If GPU memory runs out, reduce `--action-batch-size` first. See the
-[CLI guide](docs/guide/command-line.md) for all options.
+[CLI guide](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/command-line.md) for all options.
 
 ## Python
 
@@ -99,7 +99,7 @@ for video in Path("videos").glob("*.mp4"):
     runner.run(video, output_dir=Path("results") / video.stem)
 ```
 
-See the [Python guide](docs/guide/python-api.md) for parameters and progress callbacks.
+See the [Python guide](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/python-api.md) for parameters and progress callbacks.
 
 ## Results
 
@@ -116,7 +116,7 @@ Each exported analysis includes:
 
 Statistics describe model-assigned labels. Uncertain predictions are reported separately,
 and track IDs represent trajectories rather than verified animal identities.
-See [Outputs](docs/guide/outputs.md) for field definitions and duration calculations.
+See [Outputs](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/outputs.md) for field definitions and duration calculations.
 
 ## Extend Khoroos
 
@@ -124,8 +124,8 @@ Subclass `Detector`, `VideoClassifier`, or `Tracker` to use your own algorithms.
 `VideoAnalyzer` accepts custom models, and `PipelineComponents` configures the reader, tracker,
 cropper, and metrics. Class labels and behavior groups are configurable.
 
-Follow the [extension guide](docs/guide/extending.md) for working examples, or the
-[configuration guide](docs/guide/configuration.md) for devices, model sources, and cache paths.
+Follow the [extension guide](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/extending.md) for working examples, or the
+[configuration guide](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/configuration.md) for devices, model sources, and cache paths.
 
 ## Development
 
@@ -140,7 +140,7 @@ Tests use stub models and generated videos; no model download is needed.
 
 ## Resources and licenses
 
-- [Documentation](docs/index.md)
-- [ChickenAct dataset](https://zenodo.org/records/20672799) and [training notebook](notebooks/vjepa2_chicken_action_recognition.ipynb)
+- [Documentation](https://github.com/amirivojdan/khoroos/blob/main/docs/index.md)
+- [ChickenAct dataset](https://zenodo.org/records/20672799) and [training notebook](https://github.com/amirivojdan/khoroos/blob/main/notebooks/vjepa2_chicken_action_recognition.ipynb)
 - Public models: [chicken detector](https://huggingface.co/amirivojdan/chicken_rtdetrv2) and [action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action), licensed under CC BY-NC-SA 4.0.
-- Code: [PolyForm Noncommercial License 1.0.0](LICENSE).
+- Code: [PolyForm Noncommercial License 1.0.0](https://github.com/amirivojdan/khoroos/blob/main/LICENSE).

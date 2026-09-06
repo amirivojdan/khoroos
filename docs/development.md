@@ -12,6 +12,8 @@ uv run ruff check src tests
 
 Tests use stub models and generated videos; they do not need downloaded weights.
 
+See [Publish to PyPI](publishing.md) for Trusted Publisher setup and the release process.
+
 ## Documentation
 
 Start the live-reloading documentation server:

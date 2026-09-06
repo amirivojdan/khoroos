@@ -51,6 +51,7 @@ nav:
       - Result types: reference/types.md
       - Extension contracts: reference/extensions.md
   - Development: development.md
+  - Publishing: publishing.md
 
 plugins:
   - search
