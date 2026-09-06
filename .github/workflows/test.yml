@@ -1,0 +1,59 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+      KHOROOS_DEVICE: cpu
+      KHOROOS_CACHE_DIR: /tmp/khoroos-ci
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.11"
+          enable-cache: false
+
+      - name: Install video dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+
+      - name: Install locked project dependencies
+        run: uv sync --locked --extra dev --extra web --extra docs
+
+      - name: Lint
+        if: matrix.python-version == '3.12'
+        run: uv run --no-sync ruff check src tests
+
+      - name: Run tests
+        run: uv run --no-sync pytest -q
+
+      - name: Build documentation
+        if: matrix.python-version == '3.12'
+        run: uv run --no-sync mkdocs build --strict
