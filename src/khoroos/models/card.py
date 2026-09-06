@@ -2,8 +2,7 @@
 
 The action model is a frozen-encoder linear probe trained on an imbalanced dataset, so a
 raw class label alone over-states certainty. When a ``model_card.json`` sits beside the
-checkpoint, its per-class F1 and support are surfaced in the UI and used to suppress
-alerting on classes the model is demonstrably weak at.
+checkpoint, its per-class F1 and support are surfaced in the UI as descriptive evaluation metadata.
 """
 
 from __future__ import annotations

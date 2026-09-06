@@ -7,7 +7,6 @@ import json
 import logging
 import mimetypes
 import queue
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from khoroos.config import (
     PRESETS,
     AnalysisParams,
-    WelfareThresholds,
     params_for_preset,
-    thresholds_from_overrides,
 )
 from khoroos.pipeline.jobs import Job, JobManager, JobState
 
@@ -54,6 +51,9 @@ def get_config(request: Request) -> dict[str, Any]:
     """
     from khoroos.environment import describe_environment
 
+    runner = _manager(request).runner
+    if runner is not None:
+        return runner.analyzer.describe_environment()
     return describe_environment(request.app.state.settings)
 
 
@@ -116,26 +116,6 @@ def _build_params(preset: str, overrides: dict[str, Any]) -> AnalysisParams:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _build_thresholds(raw: str | None) -> WelfareThresholds:
-    """Parse the optional ``thresholds`` JSON object from a job request.
-
-    Alert thresholds are a scientific judgement call, so the UI's advanced panel lets a
-    user set them per run rather than baking one lab's numbers into the tool.
-    """
-    if not raw:
-        return WelfareThresholds()
-    try:
-        overrides = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"thresholds is not valid JSON: {exc}") from exc
-    if not isinstance(overrides, dict):
-        raise HTTPException(status_code=400, detail="thresholds must be a JSON object")
-    try:
-        return thresholds_from_overrides(overrides)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 @router.post("/jobs")
 async def create_job(
     request: Request,
@@ -147,8 +127,10 @@ async def create_job(
     detection_confidence: float | None = Form(None),
     detection_batch_size: int | None = Form(None),
     action_batch_size: int | None = Form(None),
+    action_classes: str | None = Form(None),
+    behaviour_groups: str | None = Form(None),
+    invalid_boxes: str | None = Form(None),
     render_overlay: bool = Form(False),
-    thresholds: str | None = Form(None),
 ) -> dict[str, Any]:
     """Start an analysis from an upload or a path on the server."""
     manager = _manager(request)
@@ -167,9 +149,11 @@ async def create_job(
             "detection_confidence": detection_confidence,
             "detection_batch_size": detection_batch_size,
             "action_batch_size": action_batch_size,
+            "action_classes": action_classes,
+            "behaviour_groups": behaviour_groups,
+            "invalid_boxes": invalid_boxes,
         },
     )
-    welfare_thresholds = _build_thresholds(thresholds)
 
     if server_path:
         video_path = Path(server_path).expanduser()
@@ -209,7 +193,6 @@ async def create_job(
         video_path=video_path,
         original_filename=original_name,
         params=params,
-        thresholds=welfare_thresholds,
         render_overlay=render_overlay,
     )
     return job.status_dict()
@@ -320,16 +303,10 @@ def download_export(request: Request, job_id: str, artifact: str) -> FileRespons
 @router.delete("/jobs/{job_id}")
 def delete_job(request: Request, job_id: str) -> dict[str, bool]:
     manager = _manager(request)
-    job = _job_or_404(request, job_id)
-    if not job.state.is_terminal:
-        raise HTTPException(
-            status_code=409,
-            detail="Cancel the job and wait for it to stop before deleting it.",
-        )
-    shutil.rmtree(manager.job_dir(job_id), ignore_errors=True)
-    if job.video_path.is_relative_to(manager.settings.jobs_dir):
-        job.video_path.unlink(missing_ok=True)
-    with manager._lock:
-        manager._jobs.pop(job_id, None)
-        manager._subscribers.pop(job_id, None)
+    try:
+        deleted = manager.delete(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Job not found")
     return {"deleted": True}

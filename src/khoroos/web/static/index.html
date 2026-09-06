@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Khoroos — Poultry Welfare Monitoring</title>
+<title>Khoroos — Poultry Behavior Statistics</title>
 <link rel="icon" href="/khoroos.png" type="image/png">
   <link rel="stylesheet" href="/styles.css?v=responsive-33">
 </head>
@@ -13,7 +13,7 @@
   <div class="brand">
     <img class="brand-mark" src="/khoroos.png" alt="" width="284" height="352">
     <span class="brand-name">Khoroos</span>
-    <span class="brand-sub">poultry welfare analysis</span>
+    <span class="brand-sub">poultry behavior analysis</span>
   </div>
   <nav class="site-nav" aria-label="Project links">
     <a href="https://github.com/amirivojdan/khoroos#readme" target="_blank" rel="noopener">Documentation</a>
@@ -46,17 +46,17 @@
           <h1>Khoroos</h1>
           <span class="hero-name-note">(Persian for “rooster”, pronounced kho-ROOS)</span>
         </div>
-        <p class="hero-subtitle">An open toolkit for poultry welfare analysis</p>
+        <p class="hero-subtitle">An open toolkit for poultry behavior analysis</p>
       </div>
       <p class="lede">
-        Khoroos turns poultry-house footage into individual bird trajectories, behavior timelines, and quantitative welfare indicators. Developed at the
+        Khoroos turns poultry-house footage into individual bird trajectories, behavior timelines, and descriptive behavior statistics. Developed at the
         <a href="https://www.ut-smartagriculture.com/" target="_blank" rel="noopener">
           UT Smart Agriculture Lab</a>.
       </p>
       <ul class="hero-features" aria-label="Khoroos capabilities">
         <li>Precision Livestock Farming</li>
         <li>Livestock Video Analytics</li>
-        <li>Automated Welfare Assessment</li>
+        <li>Behavior Analysis</li>
       </ul>
       <div class="hero-actions">
         <button id="getting-started" class="btn btn-primary landing-cta" type="button">
@@ -154,19 +154,19 @@
           </div>
         </fieldset>
 
+        <div class="field-row">
+          <label for="opt-action-classes">Behaviors of interest</label>
+          <input id="opt-action-classes" type="text" placeholder="All behaviors">
+          <span class="hint">Optional comma-separated labels, e.g. feeding, drinking.
+            Leave blank to include all model classes.</span>
+        </div>
+
         <div class="field-row field-check">
           <input id="opt-overlay" type="checkbox">
           <label for="opt-overlay">Also render an annotated video (slower)</label>
         </div>
 
-        <fieldset class="field">
-          <legend>Alert thresholds</legend>
-          <p class="hint">
-            Khoroos flags indicators outside these values. They are your judgement to set —
-            the defaults are starting points, not a standard.
-          </p>
-          <div id="threshold-options"></div>
-        </fieldset>
+
       </details>
 
         <button id="start-btn" class="btn btn-primary btn-block" type="button" disabled>
@@ -299,8 +299,8 @@
   </div>
 
   <p class="footnote">
-    Khoroos reports behavioural indicators; it does not diagnose welfare. Interpret these
-    figures alongside on-farm observation.
+    Statistics summarize model-assigned behavior labels. Observation time and classification
+    confidence are reported alongside the measurements.
   </p>
 </section>
 

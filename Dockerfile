@@ -31,11 +31,15 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /opt/khoroos
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --extra web --no-install-project
+
 COPY src/ ./src/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra web
+    uv sync --locked --no-dev --extra web --no-editable
 
 FROM base AS runtime
 
@@ -45,7 +49,8 @@ RUN groupadd --gid 10001 khoroos \
 
 WORKDIR /opt/khoroos
 
-COPY --from=builder --chown=khoroos:khoroos /opt/khoroos /opt/khoroos
+COPY --from=builder /opt/khoroos/.venv /opt/khoroos/.venv
+COPY LICENSE ./LICENSE
 COPY --chown=khoroos:khoroos --chmod=755 docker/entrypoint.sh /usr/local/bin/khoroos-entrypoint
 
 ENV PATH=/opt/khoroos/.venv/bin:$PATH \
@@ -53,15 +58,12 @@ ENV PATH=/opt/khoroos/.venv/bin:$PATH \
     KHOROOS_CACHE_DIR=/var/lib/khoroos \
     KHOROOS_HOST=0.0.0.0 \
     KHOROOS_PORT=8000 \
-    KHOROOS_PREFETCH_MODELS=1
+    KHOROOS_PREFETCH_MODELS=auto
 
 VOLUME ["/var/lib/khoroos"]
 EXPOSE 8000
 
 USER khoroos
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).close()"]
 
 ENTRYPOINT ["khoroos-entrypoint"]
 CMD ["khoroos", "ui", "--host", "0.0.0.0", "--port", "8000", "--no-browser"]

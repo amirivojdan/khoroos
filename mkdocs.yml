@@ -1,5 +1,5 @@
 site_name: Khoroos
-site_description: An open toolkit for video-based poultry welfare monitoring
+site_description: A toolkit for video-based poultry behavior analysis
 site_url: https://amirivojdan.github.io/khoroos/
 repo_url: https://github.com/amirivojdan/khoroos
 repo_name: amirivojdan/khoroos
@@ -35,9 +35,11 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - User guide:
+      - Docker: guide/docker.md
       - Command line: guide/command-line.md
       - Web interface: guide/web-interface.md
       - Python API: guide/python-api.md
+      - Replacing components: guide/extending.md
       - Configuration: guide/configuration.md
       - Outputs: guide/outputs.md
       - Interpreting results: guide/interpreting-results.md
@@ -47,6 +49,7 @@ nav:
       - Analysis pipeline: reference/analysis.md
       - Runner: reference/runner.md
       - Result types: reference/types.md
+      - Extension contracts: reference/extensions.md
   - Development: development.md
 
 plugins:

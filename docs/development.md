@@ -1,14 +1,20 @@
-# Documentation development
+# Development
 
 ## Set up the environment
 
-From the repository root, install the documentation dependency group:
+From the repository root, install the test, web, and documentation extras:
 
 ```bash
-uv sync --extra docs
+uv sync --locked --extra dev --extra web --extra docs
+uv run pytest
+uv run ruff check src tests
 ```
 
-Start the live-reloading development server:
+Tests use stub models and generated videos; they do not need downloaded weights.
+
+## Documentation
+
+Start the live-reloading documentation server:
 
 ```bash
 uv run mkdocs serve
@@ -26,7 +32,20 @@ uv run mkdocs build --strict
 Strict mode treats broken internal links, missing navigation entries, and documentation-plugin
 warnings as build failures. The generated site is written to `site/`, which is ignored by Git.
 
-## Project layout
+## Container validation
+
+```bash
+docker compose config --quiet
+docker build -t khoroos:local .
+docker run --rm -e KHOROOS_DEVICE=cpu khoroos:local khoroos info
+docker run --rm khoroos:local python -c "import torchcodec; print(torchcodec.__version__)"
+```
+
+The image installs the locked dependencies and a non-editable Khoroos package. Source changes
+reuse the dependency layer. The runtime image includes the installed web assets and excludes
+notebooks, training checkpoints, and development tools.
+
+## Documentation layout
 
 ```text
 mkdocs.yml                 # Site configuration and navigation

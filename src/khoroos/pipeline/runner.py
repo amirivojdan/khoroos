@@ -15,9 +15,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
-from khoroos.config import AnalysisParams, Settings, WelfareThresholds, get_settings
+from khoroos.config import AnalysisParams, Settings, get_settings
 from khoroos.pipeline.analyze import VideoAnalyzer
 from khoroos.pipeline.types import AnalysisResult, ProgressEvent
 
@@ -59,8 +60,13 @@ class AnalysisRunner:
         self,
         analyzer: VideoAnalyzer | None = None,
         settings: Settings | None = None,
+        *,
+        exporter: Callable[[AnalysisResult, Path], dict[str, Path]] | None = None,
+        overlay_renderer: Callable[..., Path] | None = None,
     ) -> None:
-        self.settings = settings or get_settings()
+        self.exporter = exporter
+        self.overlay_renderer = overlay_renderer
+        self.settings = settings or (analyzer.settings if analyzer is not None else get_settings())
         self.analyzer = analyzer or VideoAnalyzer(settings=self.settings)
 
     def run(
@@ -68,7 +74,6 @@ class AnalysisRunner:
         video_path: str | Path,
         output_dir: str | Path,
         params: AnalysisParams | None = None,
-        thresholds: WelfareThresholds | None = None,
         preset: str = "balanced",
         render_overlay: bool = False,
         on_progress: Callable[[ProgressEvent], None] | None = None,
@@ -92,7 +97,6 @@ class AnalysisRunner:
         result = self.analyzer.analyze(
             video_path,
             params=params,
-            thresholds=thresholds,
             preset=preset,
             on_progress=on_progress,
             should_cancel=should_cancel,
@@ -105,8 +109,11 @@ class AnalysisRunner:
 
         if render_overlay:
             emit("overlay", "Rendering annotated video")
-            from khoroos.video.writer import render_overlay as render
+            render = self.overlay_renderer
+            if render is None:
+                from khoroos.video.writer import render_overlay as render
 
+                render = partial(render, source_factory=self.analyzer.components.source_factory)
             artifacts.overlay = render(
                 video_path,
                 result,
@@ -123,10 +130,12 @@ class AnalysisRunner:
         require_exports: bool,
         artifacts: RunArtifacts,
     ) -> dict[str, Path]:
-        from khoroos.welfare.export import export_all
+        export = self.exporter
+        if export is None:
+            from khoroos.statistics.export import export_all as export
 
         try:
-            return export_all(result, output_dir)
+            return export(result, output_dir)
         except OSError as exc:
             if require_exports:
                 raise

@@ -156,7 +156,7 @@ def test_result_is_json_serialisable(stub_analyzer, synthetic_video):
         synthetic_video, params=params_for_preset("balanced", detection_stride=1)
     )
     payload = json.loads(json.dumps(result.to_dict()))
-    assert payload["schema_version"] == "1.0"
+    assert payload["schema_version"] == "2.0"
     assert {"video", "params", "model", "predictions", "metrics", "tracks"} <= set(payload)
 
 
@@ -166,7 +166,7 @@ def test_result_is_json_serialisable(stub_analyzer, synthetic_video):
 
 
 def test_export_bundle_is_written(stub_analyzer, synthetic_video, tmp_path):
-    from khoroos.welfare.export import export_all
+    from khoroos.statistics.export import export_all
 
     result = stub_analyzer.analyze(
         synthetic_video, params=params_for_preset("balanced", detection_stride=1)
@@ -214,7 +214,8 @@ def _render_recording_rectangles(monkeypatch, stub_analyzer, video, output, min_
     monkeypatch.setattr(writer_module.ImageDraw, "Draw", RecordingDraw)
 
     result = stub_analyzer.analyze(
-        video, params=params_for_preset("balanced", detection_stride=1, min_confidence=min_confidence)
+        video,
+        params=params_for_preset("balanced", detection_stride=1, min_confidence=min_confidence),
     )
     assert result.predictions, "the fixture produced no predictions to draw"
     # Long enough to cover the first classified window, which starts at t=1s once the

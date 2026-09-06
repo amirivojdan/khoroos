@@ -16,7 +16,10 @@ htmlcov/
 build/
 dist/
 docs/
+site/
 notebooks/
+*.safetensors
+*.ckpt
 tests/
 khoroos-output/
 *.mp4

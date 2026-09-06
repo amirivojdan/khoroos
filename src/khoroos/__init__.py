@@ -1,11 +1,11 @@
-"""Khoroos — an open toolkit for poultry welfare monitoring.
+"""Khoroos — a toolkit for poultry behavior analysis.
 
 Typical use::
 
     from khoroos import analyze_video
 
     result = analyze_video("farm.mp4", preset="balanced")
-    print(result.metrics["indicators"])
+    print(result.metrics["time_budget"])
 
 Or from the command line::
 
@@ -20,10 +20,8 @@ from khoroos.config import (
     UNCERTAIN_LABEL,
     AnalysisParams,
     Settings,
-    WelfareThresholds,
     get_settings,
     params_for_preset,
-    thresholds_from_overrides,
 )
 from khoroos.pipeline.types import (
     ActionPrediction,
@@ -53,6 +51,12 @@ __all__ = [
     "PRESETS",
     "UNCERTAIN_LABEL",
     "ActionPrediction",
+    "Detector",
+    "VideoClassifier",
+    "Tracker",
+    "VideoReader",
+    "PipelineComponents",
+    "SelectedClasses",
     "AnalysisParams",
     "AnalysisResult",
     "AnalysisRunner",
@@ -63,18 +67,22 @@ __all__ = [
     "Tracklet",
     "VideoAnalyzer",
     "VideoInfo",
-    "WelfareThresholds",
     "__version__",
     "analyze_video",
     "describe_environment",
     "get_settings",
     "params_for_preset",
-    "thresholds_from_overrides",
 ]
 
 #: Names served lazily, and the module each comes from. Everything here transitively
 #: imports torch.
 _LAZY = {
+    "Detector": "khoroos.interfaces",
+    "VideoClassifier": "khoroos.interfaces",
+    "Tracker": "khoroos.interfaces",
+    "VideoReader": "khoroos.interfaces",
+    "PipelineComponents": "khoroos.pipeline.components",
+    "SelectedClasses": "khoroos.models.selection",
     "AnalysisRunner": "khoroos.pipeline.runner",
     "RunArtifacts": "khoroos.pipeline.runner",
     "VideoAnalyzer": "khoroos.pipeline.analyze",

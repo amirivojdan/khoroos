@@ -7,28 +7,28 @@ accelerator; CPU inference is available but the action model is slow on CPU.
 
 ## Install
 
-Install the command-line tool and web interface with `uv`:
+Install the command-line tool and web interface from this repository:
 
 ```bash
-uv tool install "khoroos[web]"
+git clone https://github.com/amirivojdan/khoroos.git
+cd khoroos
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install ".[web]"
 ```
 
-Or use `pip` in an existing environment:
+The default [detector](https://huggingface.co/amirivojdan/chicken_rtdetrv2) and
+[action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action) are private.
+Authenticate with an account that has read access to both, then download the weights:
 
 ```bash
-python -m pip install "khoroos[web]"
-```
-
-Download the model checkpoints before the first analysis:
-
-```bash
+hf auth login
 khoroos models download
 khoroos models status
 ```
 
-The detector checkpoint is public. If the action checkpoint is not available from the Hub,
-set `KHOROOS_ACTION_PATH` to a local directory containing the fine-tuned V-JEPA2 model and
-processor files.
+`HF_TOKEN` can be used instead of interactive login. Downloads are cached per repository
+and reused offline. Old notebook checkpoint folders are not searched.
 
 ## Verify the environment
 
@@ -38,7 +38,7 @@ khoroos info
 ```
 
 `khoroos info` reports the selected device, cache location, available checkpoints, presets,
-behaviour groups, and alert thresholds.
+and behaviour groups.
 
 ## Run a first analysis
 

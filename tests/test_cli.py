@@ -65,8 +65,6 @@ def test_analyze_accepts_parameter_overrides(cli, synthetic_video, tmp_path):
             "window_seconds=1.5",
             "-s",
             "max_duration_seconds=3",
-            "-t",
-            "min_locomotion_share=0.25",
         ],
     )
 
@@ -136,15 +134,6 @@ def test_analyze_rejects_an_unknown_parameter(cli, synthetic_video, tmp_path):
     assert "window_seconds" in result.output  # the message lists the valid names
 
 
-def test_analyze_rejects_an_out_of_range_threshold(cli, synthetic_video, tmp_path):
-    result = cli.invoke(
-        app, ["analyze", str(synthetic_video), "-o", str(tmp_path), "-t", "min_comfort_share=7"]
-    )
-
-    assert result.exit_code == 2
-    assert "min_comfort_share" in result.output
-
-
 def test_analyze_rejects_malformed_overrides(cli, synthetic_video, tmp_path):
     result = cli.invoke(
         app, ["analyze", str(synthetic_video), "-o", str(tmp_path), "-s", "window_seconds"]
@@ -176,17 +165,25 @@ def test_analyze_rejects_an_unknown_preset(cli, synthetic_video, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_info_json_is_the_description_the_web_also_serves():
+@pytest.mark.parametrize("with_metadata", [False, True])
+def test_info_json_is_the_description_the_web_also_serves(monkeypatch, tmp_path, with_metadata):
     """`khoroos info --json` and GET /api/config both render describe_environment()."""
-    from khoroos.config import get_settings
+    import khoroos.config as config
     from khoroos.environment import describe_environment
+
+    settings = config.Settings(device="cpu", cache_dir=tmp_path, action_path=tmp_path)
+    monkeypatch.setattr(config, "_settings", settings)
+    if with_metadata:
+        (tmp_path / "config.json").write_text(json.dumps({
+            "id2label": dict(enumerate(config.ACTION_CLASSES)),
+        }))
 
     result = runner.invoke(app, ["info", "--json"])
     assert result.exit_code == 0, result.output
 
     payload = json.loads(result.output)
-    assert payload == describe_environment(get_settings())
-    assert len(payload["classes"]) == 15
+    assert payload == describe_environment(settings)
+    assert payload["classes"] == (list(config.ACTION_CLASSES) if with_metadata else [])
     assert set(payload["presets"]) == {"fast", "balanced", "thorough"}
 
 
@@ -196,7 +193,7 @@ def test_info_is_human_readable():
     assert result.exit_code == 0, result.output
     assert "Presets" in result.output
     assert "balanced" in result.output
-    assert "Alert thresholds" in result.output
+    assert "Alert thresholds" not in result.output
 
 
 def test_version_reports_the_package_version():
@@ -206,3 +203,48 @@ def test_version_reports_the_package_version():
 
     assert result.exit_code == 0
     assert result.output.strip() == __version__
+
+
+def test_class_selection_reaches_pipeline(cli, synthetic_video, tmp_path):
+    response = cli.invoke(
+        app,
+        [
+            "analyze",
+            str(synthetic_video),
+            "-o",
+            str(tmp_path),
+            "-s",
+            "action_classes=feeding,drinking",
+        ],
+    )
+    assert response.exit_code == 0, response.output
+    result = json.loads((tmp_path / "result.json").read_text())
+    assert result["model"]["classes"] == ["feeding", "drinking"]
+    assert "indicators" not in result["metrics"]
+
+
+def test_welfare_threshold_option_is_removed():
+    response = runner.invoke(app, ["analyze", "--help"])
+    assert response.exit_code == 0
+    assert "--threshold" not in response.output
+
+
+def test_device_typo_fails_before_runner_construction(synthetic_video, monkeypatch):
+    from khoroos.pipeline import runner as runner_module
+
+    def fail(**kwargs):
+        pytest.fail("Runner must not be constructed for an invalid device")
+
+    monkeypatch.setattr(runner_module, "AnalysisRunner", fail)
+    result = runner.invoke(app, ["analyze", str(synthetic_video), "--device", "banana"])
+    assert result.exit_code == 2
+    assert "device" in result.output
+
+
+def test_cli_device_override_does_not_mutate_global(cli, synthetic_video, tmp_path):
+    from khoroos.config import get_settings
+
+    original = get_settings().device
+    result = cli.invoke(app, ["analyze", str(synthetic_video), "-o", str(tmp_path), "--device", "cpu"])
+    assert result.exit_code == 0, result.output
+    assert get_settings().device == original

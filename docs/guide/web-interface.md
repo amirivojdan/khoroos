@@ -1,9 +1,8 @@
 # Web interface
 
-Install the `web` extra and launch the local server:
+Complete [installation and model download](../getting-started.md), then launch the server:
 
 ```bash
-python -m pip install "khoroos[web]"
 khoroos ui
 ```
 
@@ -36,5 +35,12 @@ khoroos ui --host 0.0.0.0 --port 8000
 
 ## Storage
 
-Uploads, results, and job state are stored below the configured cache directory. Completed web
-jobs expire according to `KHOROOS_JOB_TTL_HOURS`; see [Configuration](configuration.md).
+Uploads and result files are stored below the configured cache directory. The job list and
+queue live in memory: restarting the server clears the list and interrupts pending work.
+Saved files remain on disk but are not restored into the UI. Export needed results before
+restarting.
+
+During a server session, terminal jobs expire `KHOROOS_JOB_TTL_HOURS` after completion.
+The worker checks between analyses and every minute while idle. Files left from earlier
+sessions are not automatically cleaned up. See
+[Configuration](configuration.md).

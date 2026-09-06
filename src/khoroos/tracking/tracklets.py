@@ -17,8 +17,8 @@ import numpy as np
 import torch
 
 from khoroos.config import AnalysisParams
+from khoroos.interfaces import VideoReader
 from khoroos.pipeline.types import Track, Tracklet
-from khoroos.video.reader import VideoSource
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ def build_tracklets(
 
 
 def extract_clip(
-    source: VideoSource,
+    source: VideoReader,
     tracklet: Tracklet,
     target_frames: int | None = None,
 ) -> torch.Tensor | None:

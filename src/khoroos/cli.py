@@ -15,12 +15,11 @@ from khoroos.config import (
     get_settings,
     params_for_preset,
     parse_overrides,
-    thresholds_from_overrides,
 )
 
 app = typer.Typer(
     name="khoroos",
-    help="Poultry welfare monitoring from farm video.",
+    help="Poultry behavior analysis from farm video.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -34,6 +33,13 @@ def _setup_logging(verbose: bool) -> None:
         format="%(levelname)s %(name)s: %(message)s",
         stream=sys.stderr,
     )
+
+
+def _runtime_settings(**overrides):
+    try:
+        return get_settings().with_overrides(**overrides)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()
@@ -82,15 +88,6 @@ def analyze(
             help="Override any analysis parameter, e.g. -s window_seconds=3. Repeatable.",
         ),
     ] = None,
-    threshold: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--threshold",
-            "-t",
-            metavar="NAME=VALUE",
-            help="Override a welfare alert threshold, e.g. -t min_locomotion_share=0.2.",
-        ),
-    ] = None,
     device: Annotated[str | None, typer.Option("--device", help="cuda, cpu, mps or auto.")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
@@ -101,9 +98,7 @@ def analyze(
         typer.secho(f"No such video: {video}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
 
-    settings = get_settings()
-    if device:
-        settings.device = device
+    settings = _runtime_settings(device=device)
 
     try:
         # The named flags are shorthands for the same fields `--set` reaches, so they go
@@ -117,7 +112,6 @@ def analyze(
         }
         overrides.update(parse_overrides(set_param or []))
         params = params_for_preset(preset, **overrides)
-        thresholds = thresholds_from_overrides(parse_overrides(threshold or []))
     except ValueError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from None
@@ -143,7 +137,6 @@ def analyze(
             video,
             output_dir=output,
             params=params,
-            thresholds=thresholds,
             render_overlay=overlay,
             on_progress=on_progress,
         )
@@ -157,7 +150,6 @@ def analyze(
 def _print_summary(result) -> None:
     metrics = result.metrics
     budget = metrics.get("time_budget", {})
-    indicators = metrics.get("indicators", {})
     population = metrics.get("population", {})
 
     typer.echo("")
@@ -176,18 +168,6 @@ def _print_summary(result) -> None:
             bar = "█" * int(values["share"] * 30)
             typer.echo(f"    {label:18s} {values['share']:6.1%} {bar}")
 
-    if indicators:
-        typer.echo("\n  Welfare indicators:")
-        for name, value in indicators.items():
-            typer.echo(f"    {name:20s} {value:6.1%}")
-
-    alerts = metrics.get("alerts", [])
-    if alerts:
-        typer.echo("")
-        for alert in alerts:
-            colour = typer.colors.YELLOW if alert["level"] == "warning" else typer.colors.CYAN
-            typer.secho(f"  [{alert['level']}] {alert['message']}", fg=colour)
-
     for warning in result.warnings:
         typer.secho(f"  [note] {warning}", fg=typer.colors.MAGENTA)
 
@@ -205,13 +185,7 @@ def ui(
     """Launch the web interface."""
     _setup_logging(verbose)
 
-    settings = get_settings()
-    if device:
-        settings.device = device
-    if host:
-        settings.host = host
-    if port:
-        settings.port = port
+    settings = _runtime_settings(device=device, host=host, port=port)
 
     try:
         import uvicorn
@@ -279,7 +253,7 @@ def models_download() -> None:
 def info(
     as_json: Annotated[bool, typer.Option("--json", help="Emit machine-readable JSON.")] = False,
 ) -> None:
-    """Show presets, behaviours, thresholds and checkpoint status.
+    """Show presets, behaviours and checkpoint status.
 
     The same description the web UI builds its controls from.
     """
@@ -304,10 +278,6 @@ def info(
     typer.echo("\n  Behaviours:")
     for group, members in env["behaviour_groups"].items():
         typer.echo(f"    {group:12s} {', '.join(members)}")
-
-    typer.echo("\n  Alert thresholds (override with --threshold NAME=VALUE):")
-    for name, value in env["thresholds"].items():
-        typer.echo(f"    {name:28s} {value}")
 
     typer.echo("\n  Models:")
     _print_checkpoints(env["models"])

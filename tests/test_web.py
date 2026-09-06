@@ -14,7 +14,7 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from khoroos.config import Settings, WelfareThresholds  # noqa: E402
+from khoroos.config import Settings  # noqa: E402
 
 
 @pytest.fixture
@@ -50,12 +50,12 @@ def wait_for(client, job_id, states, timeout=60.0):
 # ---------------------------------------------------------------------------
 
 
-def test_config_endpoint_describes_the_ui(client):
-    payload = client.get("/api/config").json()
+def test_config_endpoint_describes_the_ui(stub_client):
+    payload = stub_client.get("/api/config").json()
     assert set(payload["presets"]) == {"fast", "balanced", "thorough"}
     assert len(payload["classes"]) == 15
-    assert "comfort" in payload["behaviour_groups"]
-    assert "min_comfort_share" in payload["thresholds"]
+    assert "maintenance" in payload["behaviour_groups"]
+    assert "thresholds" not in payload
 
 
 def test_static_index_is_served(client):
@@ -89,16 +89,16 @@ def test_select_screen_opens_with_project_intro_before_setup(client):
     script = client.get("/app.js").text
 
     assert "<h1>Khoroos</h1>" in page
-    assert 'class="hero-subtitle">An open toolkit for poultry welfare analysis' in page
+    assert 'class="hero-subtitle">An open toolkit for poultry behavior analysis' in page
     assert 'class="hero-name-note">(Persian for “rooster”, pronounced kho-ROOS)' in page
-    assert "quantitative welfare indicators. Developed at the" in " ".join(page.split())
+    assert "descriptive behavior statistics. Developed at the" in " ".join(page.split())
     assert 'class="site-nav"' in page
     assert 'class="hero-features"' in page
     assert "Precision Livestock Farming" in page
     assert "Livestock Video Analytics" in page
-    assert "Automated Welfare Assessment" in page
+    assert "Behavior Statistics" in page
     assert "https://www.ut-smartagriculture.com/" in page
-    assert "Khoroos is an open research toolkit for video-based poultry behavior analysis" in page
+    assert "Khoroos turns poultry-house footage into" in page
     assert "individual bird trajectories, behavior timelines" in page
     assert "UT Smart Agriculture Lab" in page
     assert "View on GitHub" in page
@@ -163,7 +163,7 @@ def test_layout_has_narrow_and_short_viewport_guards(client):
     assert ".chart-grid > *" in styles
     assert "min-inline-size: 0" in styles
     assert "min-height: 44px" in styles
-    assert "body[data-screen=\"select\"] .hero-copy { display: contents; }" in styles
+    assert 'body[data-screen="select"] .hero-copy { display: contents; }' in styles
     assert "touch-action: manipulation" in styles
 
 
@@ -235,37 +235,6 @@ def test_job_rejects_an_unknown_preset(client, synthetic_video):
     assert response.status_code == 400
 
 
-def test_job_accepts_threshold_overrides(client, synthetic_video):
-    response = client.post(
-        "/api/jobs",
-        data={
-            "server_path": str(synthetic_video),
-            "thresholds": json.dumps({"min_locomotion_share": 0.25}),
-        },
-    )
-    assert response.status_code == 200
-
-    job = client.app.state.jobs.get(response.json()["job_id"])
-    assert job.thresholds.min_locomotion_share == 0.25
-    assert job.thresholds.min_comfort_share == WelfareThresholds().min_comfort_share
-
-
-def test_job_rejects_an_unknown_threshold(client, synthetic_video):
-    response = client.post(
-        "/api/jobs",
-        data={"server_path": str(synthetic_video), "thresholds": json.dumps({"min_comfort": 0.2})},
-    )
-    assert response.status_code == 400
-    assert "min_comfort_share" in response.json()["detail"]  # lists the valid names
-
-
-def test_job_rejects_malformed_threshold_json(client, synthetic_video):
-    response = client.post(
-        "/api/jobs", data={"server_path": str(synthetic_video), "thresholds": "not json"}
-    )
-    assert response.status_code == 400
-
-
 def test_bad_parameters_are_rejected_before_the_upload_is_stored(client, synthetic_video, tmp_path):
     """A gigabyte upload must not be written to disk only to fail on a typo'd preset."""
     uploads = tmp_path / "cache" / "jobs" / "uploads"
@@ -305,7 +274,7 @@ def test_full_job_run_produces_results(stub_client, synthetic_video):
     assert status["progress"] == 1.0
 
     result = stub_client.get(f"/api/jobs/{job_id}/result").json()
-    assert result["schema_version"] == "1.0"
+    assert result["schema_version"] == "2.0"
     assert result["predictions"]
     assert result["metrics"]["time_budget"]["total_bird_seconds"] > 0
 
@@ -355,15 +324,17 @@ def test_a_zero_batch_size_is_rejected(client, synthetic_video):
 
 
 def test_result_is_409_before_completion(stub_client, synthetic_video):
-    job_id = stub_client.post("/api/jobs", data={"server_path": str(synthetic_video)}).json()["job_id"]
+    job_id = stub_client.post("/api/jobs", data={"server_path": str(synthetic_video)}).json()[
+        "job_id"
+    ]
     response = stub_client.get(f"/api/jobs/{job_id}/result")
     assert response.status_code in (200, 409)  # may already have finished
 
 
 def test_exports_download_after_completion(stub_client, synthetic_video):
-    job_id = stub_client.post(
-        "/api/jobs", data={"server_path": str(synthetic_video)}
-    ).json()["job_id"]
+    job_id = stub_client.post("/api/jobs", data={"server_path": str(synthetic_video)}).json()[
+        "job_id"
+    ]
     wait_for(stub_client, job_id, {"completed", "failed"})
 
     for artifact in ("predictions", "time_budget", "per_bird", "metrics", "result"):
@@ -375,18 +346,18 @@ def test_exports_download_after_completion(stub_client, synthetic_video):
 
 
 def test_source_video_is_served_for_the_player(stub_client, synthetic_video):
-    job_id = stub_client.post(
-        "/api/jobs", data={"server_path": str(synthetic_video)}
-    ).json()["job_id"]
+    job_id = stub_client.post("/api/jobs", data={"server_path": str(synthetic_video)}).json()[
+        "job_id"
+    ]
     response = stub_client.get(f"/api/jobs/{job_id}/video")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("video/")
 
 
 def test_job_can_be_deleted(stub_client, synthetic_video):
-    job_id = stub_client.post(
-        "/api/jobs", data={"server_path": str(synthetic_video)}
-    ).json()["job_id"]
+    job_id = stub_client.post("/api/jobs", data={"server_path": str(synthetic_video)}).json()[
+        "job_id"
+    ]
     wait_for(stub_client, job_id, {"completed", "failed"})
 
     assert stub_client.delete(f"/api/jobs/{job_id}").json() == {"deleted": True}
@@ -403,7 +374,6 @@ def test_active_job_cannot_be_deleted(client, synthetic_video):
         video_path=synthetic_video,
         original_filename=synthetic_video.name,
         params=params_for_preset(),
-        thresholds=WelfareThresholds(),
         state=JobState.RUNNING,
     )
     with manager._lock:
@@ -416,8 +386,63 @@ def test_active_job_cannot_be_deleted(client, synthetic_video):
 
 
 def test_cancelling_a_finished_job_is_409(stub_client, synthetic_video):
-    job_id = stub_client.post(
-        "/api/jobs", data={"server_path": str(synthetic_video)}
-    ).json()["job_id"]
+    job_id = stub_client.post("/api/jobs", data={"server_path": str(synthetic_video)}).json()[
+        "job_id"
+    ]
     wait_for(stub_client, job_id, {"completed", "failed"})
     assert stub_client.post(f"/api/jobs/{job_id}/cancel").status_code == 409
+
+
+def test_classes_of_interest_are_selectable_per_job(stub_client, synthetic_video):
+    response = stub_client.post(
+        "/api/jobs",
+        data={"server_path": str(synthetic_video), "action_classes": "feeding,drinking"},
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    status = wait_for(stub_client, job_id, {"completed", "failed"})
+    assert status["state"] == "completed", status.get("error")
+    result = stub_client.get(f"/api/jobs/{job_id}/result").json()
+    assert result["model"]["classes"] == ["feeding", "drinking"]
+    assert "indicators" not in result["metrics"]
+
+
+def test_duplicate_classes_rejected_before_job_creation(client, synthetic_video):
+    response = client.post(
+        "/api/jobs",
+        data={"server_path": str(synthetic_video), "action_classes": "feeding,feeding"},
+    )
+    assert response.status_code == 400
+
+
+def test_web_exposes_statistics_without_interpretation_controls(client):
+    page = client.get("/").text
+    script = client.get("/app.js").text
+    assert "Alert thresholds" not in page
+    assert "Welfare Assessment" not in page
+    assert "threshold-options" not in page
+    assert "metrics.indicators" not in script
+    assert "Classified windows" in script
+    schema = client.get("/api/openapi.json").json()
+    body_schemas = schema["components"]["schemas"].values()
+    assert all("thresholds" not in item.get("properties", {}) for item in body_schemas)
+
+
+def test_config_advertises_custom_classifier_and_groups(stub_client):
+    analyzer = stub_client.app.state.jobs.runner.analyzer
+    analyzer.recognizer.classes = ["moving", "still"]
+    analyzer.settings = analyzer.settings.with_overrides(behaviour_groups={"activity": ["moving"]})
+    payload = stub_client.get("/api/config").json()
+    assert payload["classes"] == ["moving", "still"]
+    assert payload["behaviour_groups"] == {"activity": ["moving"]}
+
+
+def test_api_accepts_custom_grouping(stub_client, synthetic_video):
+    job_id = stub_client.post("/api/jobs", data={
+        "server_path": str(synthetic_video),
+        "behaviour_groups": json.dumps({"observed_actions": ["feeding", "preening"]}),
+    }).json()["job_id"]
+    status = wait_for(stub_client, job_id, {"completed", "failed"})
+    assert status["state"] == "completed", status.get("error")
+    result = stub_client.get(f"/api/jobs/{job_id}/result").json()
+    assert set(result["metrics"]["behaviour_groups"]) == {"observed_actions"}

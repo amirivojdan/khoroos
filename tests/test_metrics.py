@@ -1,20 +1,15 @@
-"""Welfare metric tests.
-
-The emphasis is on the honesty guarantees: uncertain time is never folded into a class,
-thin samples never raise alerts, and unreliable classes never raise alerts.
-"""
+"""Descriptive statistics: durations, proportions, counts, and overlap accounting."""
 
 from __future__ import annotations
 
 import pytest
 
-from khoroos.config import UNCERTAIN_LABEL, WelfareThresholds
+from khoroos.config import UNCERTAIN_LABEL
 from khoroos.pipeline.types import ActionPrediction, VideoInfo
-from khoroos.welfare.metrics import (
+from khoroos.statistics.metrics import (
     activity_timeline,
     bout_stats,
     compute_metrics,
-    evaluate_alerts,
     group_shares,
     per_bird_budgets,
     time_budget,
@@ -79,12 +74,12 @@ def test_empty_budget_does_not_divide_by_zero():
 
 def test_group_shares_use_confident_time_only():
     predictions = [
-        make_prediction(label="preening", start=0, end=2),   # comfort
-        make_prediction(label="walking", start=2, end=4),    # locomotion
+        make_prediction(label="preening", start=0, end=2),  # comfort
+        make_prediction(label="walking", start=2, end=4),  # locomotion
         make_prediction(start=4, end=8, uncertain=True),
     ]
     groups = group_shares(time_budget(predictions))
-    assert groups["comfort"]["share"] == pytest.approx(0.5)
+    assert groups["maintenance"]["share"] == pytest.approx(0.5)
     assert groups["locomotion"]["share"] == pytest.approx(0.5)
 
 
@@ -192,49 +187,6 @@ def test_timeline_does_not_double_count_overlapping_windows():
 # ---------------------------------------------------------------------------
 
 
-def test_thin_sample_never_raises_a_threshold_alert():
-    predictions = [make_prediction(label="resting", start=0, end=4)]
-    budget = time_budget(predictions)
-    alerts = evaluate_alerts(budget=budget, groups=group_shares(budget), thresholds=WelfareThresholds())
-
-    assert [a["code"] for a in alerts] == ["insufficient_data"]
-    assert all(a["level"] != "warning" for a in alerts)
-
-
-def test_low_comfort_raises_a_warning_when_well_sampled():
-    predictions = [make_prediction(label="resting", start=i * 2, end=i * 2 + 2) for i in range(60)]
-    budget = time_budget(predictions)
-    alerts = evaluate_alerts(budget=budget, groups=group_shares(budget), thresholds=WelfareThresholds())
-
-    codes = {a["code"] for a in alerts if a["level"] == "warning"}
-    assert "comfort_behaviour_low" in codes
-    assert "inactivity_high" in codes
-
-
-def test_alert_is_suppressed_for_an_unreliable_class():
-    predictions = [make_prediction(label="resting", start=i * 2, end=i * 2 + 2) for i in range(60)]
-    budget = time_budget(predictions)
-    weak = dict.fromkeys(
-        ["preening", "dust_bathing", "wing_flapping", "stretching", "body_shaking"], 0.1
-    )
-    alerts = evaluate_alerts(
-        budget=budget, groups=group_shares(budget), thresholds=WelfareThresholds(), per_class_f1=weak
-    )
-
-    codes = {a["code"] for a in alerts}
-    assert "comfort_behaviour_low_suppressed" in codes
-    assert "comfort_behaviour_low" not in codes
-
-
-def test_high_uncertainty_is_flagged():
-    # Clearly past the >50% trigger, not sitting on the boundary.
-    predictions = [make_prediction(start=i * 2, end=i * 2 + 2, uncertain=True) for i in range(60)]
-    predictions += [make_prediction(label="resting", start=200 + i * 2, end=202 + i * 2) for i in range(40)]
-    budget = time_budget(predictions)
-    alerts = evaluate_alerts(budget=budget, groups=group_shares(budget), thresholds=WelfareThresholds())
-    assert any(a["code"] == "high_uncertainty" for a in alerts)
-
-
 # ---------------------------------------------------------------------------
 # Full metric set
 # ---------------------------------------------------------------------------
@@ -249,11 +201,40 @@ def test_compute_metrics_is_json_serialisable():
     ]
     metrics = compute_metrics(predictions, VIDEO, [(t / 25.0, 5) for t in range(0, 100, 5)])
     # Keys are used verbatim by the frontend, so a rename must break a test.
-    assert {"time_budget", "indicators", "timeline", "per_bird", "spatial", "alerts"} <= set(metrics)
+    assert {"time_budget", "population", "timeline", "per_bird", "spatial"} <= set(metrics)
     json.dumps(metrics)
 
 
 def test_compute_metrics_handles_no_predictions():
     metrics = compute_metrics([], VIDEO, [])
     assert metrics["time_budget"]["total_bird_seconds"] == 0
-    assert metrics["indicators"]["comfort_index"] == 0.0
+    assert metrics["population"]["mean"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "label,uncertain", [("resting", False), ("feeding", True), ("custom", False)]
+)
+def test_statistics_never_emit_interpretations(label, uncertain):
+    predictions = [
+        make_prediction(label=label, start=i * 2, end=i * 2 + 2, uncertain=uncertain)
+        for i in range(100)
+    ]
+    metrics = compute_metrics(predictions, VIDEO, [(0, 10)], classes=[label])
+    assert set(metrics) == {
+        "time_budget",
+        "behaviour_groups",
+        "population",
+        "timeline",
+        "per_bird",
+        "bouts",
+        "spatial",
+    }
+    assert metrics["time_budget"]["total_bird_seconds"] == 200
+    assert metrics["time_budget"]["uncertain_share"] == (1 if uncertain else 0)
+
+
+def test_class_subset_only_groups_available_labels():
+    metrics = compute_metrics([make_prediction(label="feeding")], VIDEO, [], classes=["feeding"])
+    assert set(metrics["behaviour_groups"]) == {"ingestive"}
+    assert metrics["behaviour_groups"]["ingestive"]["members"] == ["feeding"]
+    assert compute_metrics([], VIDEO, [], classes=["custom"])["behaviour_groups"] == {}

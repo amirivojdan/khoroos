@@ -5,7 +5,7 @@ A command-line run and `AnalysisRunner.run()` write the same export bundle.
 | File | Contents | Typical use |
 | --- | --- | --- |
 | `result.json` | Full versioned result, including tracks and predictions | Archival and application integration |
-| `metrics.json` | Welfare metrics, time budgets, population summaries, and alerts | Summary reporting |
+| `metrics.json` | Behavior time budgets, population summaries, and spatial statistics | Summary reporting |
 | `predictions.csv` | One row per classified track window | Statistical analysis |
 | `time_budget.csv` | Flock-level row per behaviour | Ethogram and budget reporting |
 | `per_bird.csv` | Approximate per-track behaviour shares | Exploratory individual-level analysis |
@@ -23,7 +23,7 @@ The top-level object contains:
 - `model`: checkpoint provenance, classes, and reliability metadata
 - `tracks`: time-indexed bird boxes
 - `predictions`: labels, confidence, alternatives, and boxes for each window
-- `metrics`: aggregated budgets, indicators, population statistics, and alerts
+- `metrics`: aggregated budgets, population statistics, bouts, and spatial summaries
 - `warnings`: limitations detected during the run
 - `frame_counts`: time-indexed bird counts
 - `runtime_s`: total analysis runtime

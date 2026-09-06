@@ -1,12 +1,14 @@
 [project]
 name = "khoroos"
 version = "0.1.0"
-description = "An open toolkit for poultry welfare monitoring."
+description = "A toolkit for poultry behavior analysis."
 readme = "README.md"
+license = "PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Ahmad Amirivojdan", email = "amirivojdan@gmail.com" }
 ]
-keywords = ["poultry", "welfare", "animal-science", "action-recognition", "computer-vision"]
+keywords = ["poultry", "behavior-statistics", "animal-science", "action-recognition", "computer-vision"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",

@@ -10,7 +10,7 @@ from khoroos import analyze_video
 result = analyze_video("farm.mp4", preset="balanced")
 
 print(result.video.duration_seconds)
-print(result.metrics["indicators"])
+print(result.metrics["time_budget"])
 for prediction in result.predictions[:5]:
     print(prediction.track_id, prediction.label, prediction.confidence)
 ```
@@ -20,16 +20,15 @@ for prediction in result.predictions[:5]:
 Build validated parameters from a preset and explicit overrides:
 
 ```python
-from khoroos import analyze_video, params_for_preset, thresholds_from_overrides
+from khoroos import analyze_video, params_for_preset
 
 params = params_for_preset(
     "balanced",
     window_seconds=3.0,
     detection_stride=1,
 )
-thresholds = thresholds_from_overrides({"min_locomotion_share": 0.2})
 
-result = analyze_video("farm.mp4", params=params, thresholds=thresholds)
+result = analyze_video("farm.mp4", params=params)
 ```
 
 ## Write the export bundle
@@ -73,3 +72,6 @@ runner.run(
 ```
 
 See the [API reference](../reference/index.md) for signatures and result types.
+
+For custom detectors, classifiers, trackers, annotation formats, and class selection, see
+[Replacing pipeline components](extending.md).

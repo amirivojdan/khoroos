@@ -20,7 +20,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from khoroos.config import AnalysisParams, Settings, WelfareThresholds, get_settings
+from khoroos.config import AnalysisParams, Settings, get_settings
 from khoroos.pipeline.types import AnalysisResult, ProgressEvent
 
 if TYPE_CHECKING:  # importing the runner eagerly would pull torch in at web-app startup
@@ -49,7 +49,7 @@ class Job:
     video_path: Path
     original_filename: str
     params: AnalysisParams
-    thresholds: WelfareThresholds
+
     render_overlay: bool = False
 
     state: JobState = JobState.QUEUED
@@ -91,7 +91,7 @@ class JobManager:
     def __init__(
         self, settings: Settings | None = None, runner: AnalysisRunner | None = None
     ) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings or (runner.settings if runner is not None else get_settings())
         #: Built on first use so the UI starts before 1.7 GB of weights load. Injectable so
         #: callers — tests, embedders — can supply an already-loaded or stubbed runner.
         self.runner = runner
@@ -100,9 +100,9 @@ class JobManager:
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._subscribers: dict[str, list[queue.Queue]] = {}
         self._closed = threading.Event()
+        self.settings.jobs_dir.mkdir(parents=True, exist_ok=True)
         self._worker = threading.Thread(target=self._run_worker, daemon=True, name="khoroos-worker")
         self._worker.start()
-        self.settings.jobs_dir.mkdir(parents=True, exist_ok=True)
 
     # -- registry ----------------------------------------------------------
 
@@ -111,7 +111,6 @@ class JobManager:
         video_path: Path,
         original_filename: str,
         params: AnalysisParams,
-        thresholds: WelfareThresholds | None = None,
         render_overlay: bool = False,
     ) -> Job:
         if self._closed.is_set():
@@ -121,7 +120,6 @@ class JobManager:
             video_path=video_path,
             original_filename=original_filename,
             params=params,
-            thresholds=thresholds or WelfareThresholds(),
             render_overlay=render_overlay,
         )
         with self._lock:
@@ -140,13 +138,41 @@ class JobManager:
             return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
 
     def cancel(self, job_id: str) -> bool:
-        job = self.get(job_id)
-        if job is None or job.state.is_terminal:
-            return False
-        job._cancel.set()
-        if job.state == JobState.QUEUED:
-            self._finish(job, JobState.CANCELLED, "Cancelled before starting")
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.state.is_terminal:
+                return False
+            job._cancel.set()
+            queued = job.state == JobState.QUEUED
+            if queued:
+                job.state = JobState.CANCELLED
+                job.message = "Cancelled before starting"
+                job.finished_at = time.time()
+        if queued:
+            self._publish(job)
         return True
+
+    def delete(self, job_id: str) -> bool:
+        """Delete a terminal job and its managed artifacts, never an external source video.
+
+        Returns False if the job is absent. Active jobs raise ValueError. Registry changes
+        and deletion are serialized so cleanup and HTTP deletion share the same operation.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            if not job.state.is_terminal:
+                raise ValueError("Cancel the job and wait for it to stop before deleting it.")
+            directory = self.settings.jobs_dir / job_id
+            if directory.exists():
+                shutil.rmtree(directory)
+            source = job.video_path
+            if source.resolve().is_relative_to(self.settings.jobs_dir.resolve()):
+                source.unlink(missing_ok=True)
+            del self._jobs[job_id]
+            self._subscribers.pop(job_id, None)
+            return True
 
     def job_dir(self, job_id: str) -> Path:
         path = self.settings.jobs_dir / job_id
@@ -183,7 +209,14 @@ class JobManager:
 
     def _run_worker(self) -> None:
         while True:
-            job_id = self._queue.get()
+            try:
+                self.cleanup_expired()
+            except OSError:
+                logger.exception("Could not clean up expired jobs")
+            try:
+                job_id = self._queue.get(timeout=60)
+            except queue.Empty:
+                continue
             if job_id is None:
                 return
             job = self.get(job_id)
@@ -198,10 +231,13 @@ class JobManager:
         from khoroos.pipeline.analyze import CancelledError
         from khoroos.pipeline.runner import AnalysisRunner
 
-        job.state = JobState.RUNNING
-        job.started_at = time.time()
-        job.stage = "loading"
-        job.message = "Loading models"
+        with self._lock:
+            if job.state.is_terminal or job.job_id not in self._jobs:
+                return
+            job.state = JobState.RUNNING
+            job.started_at = time.time()
+            job.stage = "loading"
+            job.message = "Loading models"
         self._publish(job)
 
         if self.runner is None:
@@ -219,7 +255,6 @@ class JobManager:
                 job.video_path,
                 output_dir=self.job_dir(job.job_id),
                 params=job.params,
-                thresholds=job.thresholds,
                 render_overlay=job.render_overlay,
                 on_progress=on_progress,
                 should_cancel=job._cancel.is_set,
@@ -255,19 +290,13 @@ class JobManager:
     # -- housekeeping -------------------------------------------------------
 
     def cleanup_expired(self) -> int:
-        """Delete artifacts for jobs older than the configured TTL."""
+        """Delete terminal jobs once the configured TTL has elapsed since completion."""
         cutoff = time.time() - self.settings.job_ttl_hours * 3600
         removed = 0
         for job in self.list_jobs():
-            if job.created_at >= cutoff or not job.state.is_terminal:
+            if not job.state.is_terminal or job.finished_at is None or job.finished_at >= cutoff:
                 continue
-            shutil.rmtree(self.job_dir(job.job_id), ignore_errors=True)
-            if job.video_path.exists() and job.video_path.is_relative_to(self.settings.jobs_dir):
-                job.video_path.unlink(missing_ok=True)
-            with self._lock:
-                self._jobs.pop(job.job_id, None)
-                self._subscribers.pop(job.job_id, None)
-            removed += 1
+            removed += int(self.delete(job.job_id))
         return removed
 
     def close(self, timeout: float = 5.0) -> None:
@@ -277,8 +306,6 @@ class JobManager:
         self._closed.set()
         for job in self.list_jobs():
             if not job.state.is_terminal:
-                job._cancel.set()
-                if job.state == JobState.QUEUED:
-                    self._finish(job, JobState.CANCELLED, "Cancelled during shutdown")
+                self.cancel(job.job_id)
         self._queue.put(None)
         self._worker.join(timeout=timeout)

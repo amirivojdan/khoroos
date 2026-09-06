@@ -237,7 +237,9 @@ def test_strided_detections_are_interpolated():
     """With detection_stride > 1 the window must still be densely covered."""
     _, boxes = _smooth_track(n=50, size=150, step=4)
     params = AnalysisParams(window_seconds=2.0, stride_seconds=1.0)
-    tracklets, rejects = build_tracklets(_track_from(boxes, stride=2), params, FPS, FRAME_W, FRAME_H)
+    tracklets, rejects = build_tracklets(
+        _track_from(boxes, stride=2), params, FPS, FRAME_W, FRAME_H
+    )
     assert tracklets, f"interpolation should fill strided frames; rejects={rejects}"
     assert len(tracklets[0].frame_indices) >= int(2.0 * FPS * 0.9)
 

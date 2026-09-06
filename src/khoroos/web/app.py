@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from khoroos.pipeline.runner import AnalysisRunner
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -17,14 +21,16 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, runner: AnalysisRunner | None = None
+) -> FastAPI:
     """Build the application. The job manager is attached to app state."""
-    settings = settings or get_settings()
-    jobs = JobManager(settings)
+    settings = settings or (runner.settings if runner is not None else get_settings())
+    jobs = JobManager(settings, runner=runner)
 
     app = FastAPI(
         title="Khoroos",
-        description="Poultry welfare monitoring from farm video.",
+        description="Poultry behavior analysis from farm video.",
         version=__version__,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",

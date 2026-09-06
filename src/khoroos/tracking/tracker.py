@@ -15,6 +15,7 @@ import logging
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from khoroos.interfaces import Tracker
 from khoroos.pipeline.types import Track, TrackObservation
 from khoroos.tracking.kalman import BoxKalmanFilter
 
@@ -65,7 +66,7 @@ class _ActiveTrack:
         )
 
 
-class BirdTracker:
+class BirdTracker(Tracker):
     """SORT-style tracker over chicken detections."""
 
     def __init__(
@@ -96,9 +97,9 @@ class BirdTracker:
         Returns ``(track_id, box)`` for every confirmed track present in this frame.
         """
         # 1. Predict where every active track should be now.
-        predicted = np.array(
-            [t.kf.predict() for t in self._active], dtype=np.float32
-        ).reshape(-1, 4)
+        predicted = np.array([t.kf.predict() for t in self._active], dtype=np.float32).reshape(
+            -1, 4
+        )
         for track in self._active:
             track.age += 1
             track.time_since_update += 1

@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from khoroos.interfaces import VideoReader
 from khoroos.pipeline.types import VideoInfo
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ class VideoReadError(RuntimeError):
     """Raised when a video cannot be opened or decoded."""
 
 
-class VideoSource:
+class VideoSource(VideoReader):
     """Random-access reader over a video file.
 
     Frames are returned as ``(C, H, W)`` uint8 tensors in RGB, matching what the
@@ -87,10 +88,6 @@ class VideoSource:
     @property
     def height(self) -> int:
         return self.info.height
-
-    def time_of(self, frame_index: int) -> float:
-        """Presentation time in seconds for a frame index."""
-        return frame_index / self.info.fps
 
     # -- access ------------------------------------------------------------
 

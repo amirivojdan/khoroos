@@ -13,16 +13,18 @@ from pathlib import Path
 
 import numpy as np
 
+from khoroos.annotations import Detections
 from khoroos.config import (
+    UNCERTAIN_LABEL,
     AnalysisParams,
     Settings,
-    WelfareThresholds,
     get_settings,
     params_for_preset,
 )
-from khoroos.models.action import ActionRecognizer
-from khoroos.models.card import load_model_card, per_class_f1, per_class_support
-from khoroos.models.detector import ChickenDetector
+from khoroos.interfaces import Detector, VideoClassifier, VideoReader, component_name, model_card
+from khoroos.models.card import per_class_f1, per_class_support
+from khoroos.models.selection import SelectedClasses
+from khoroos.pipeline.components import PipelineComponents
 from khoroos.pipeline.types import (
     ActionPrediction,
     AnalysisResult,
@@ -32,10 +34,6 @@ from khoroos.pipeline.types import (
     Tracklet,
     VideoInfo,
 )
-from khoroos.tracking.tracker import BirdTracker
-from khoroos.tracking.tracklets import build_tracklets, extract_clip
-from khoroos.video.reader import VideoSource
-from khoroos.welfare.metrics import compute_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -78,24 +76,38 @@ class VideoAnalyzer:
     def __init__(
         self,
         settings: Settings | None = None,
-        detector: ChickenDetector | None = None,
-        recognizer: ActionRecognizer | None = None,
+        detector: Detector | None = None,
+        recognizer: VideoClassifier | None = None,
+        components: PipelineComponents | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self._detector = detector
         self._recognizer = recognizer
+        self.components = components or PipelineComponents()
 
     @property
-    def detector(self) -> ChickenDetector:
+    def detector(self) -> Detector:
         if self._detector is None:
+            from khoroos.models.detector import ChickenDetector
+
             self._detector = ChickenDetector(settings=self.settings)
         return self._detector
 
     @property
-    def recognizer(self) -> ActionRecognizer:
+    def recognizer(self) -> VideoClassifier:
         if self._recognizer is None:
+            from khoroos.models.action import ActionRecognizer
+
             self._recognizer = ActionRecognizer(settings=self.settings)
         return self._recognizer
+
+    def describe_environment(self) -> dict:
+        """Describe this composition using injected models or local checkpoint metadata."""
+        from khoroos.environment import describe_environment
+
+        return describe_environment(
+            self.settings, classifier=self._recognizer, detector=self._detector
+        )
 
     # -- main entry points -------------------------------------------------
 
@@ -103,35 +115,45 @@ class VideoAnalyzer:
         self,
         video_path: str | Path,
         params: AnalysisParams | None = None,
-        thresholds: WelfareThresholds | None = None,
         preset: str = "balanced",
         on_progress: Callable[[ProgressEvent], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> AnalysisResult:
         """Analyse a video, returning the finished result."""
         result: AnalysisResult | None = None
-        for item in self.iter_analyze(
-            video_path, params, thresholds, preset, should_cancel=should_cancel
-        ):
+        for item in self.iter_analyze(video_path, params, preset, should_cancel=should_cancel):
             if isinstance(item, ProgressEvent):
                 if on_progress is not None:
                     on_progress(item)
             else:
                 result = item
-        assert result is not None, "pipeline finished without producing a result"
+        if result is None:
+            raise RuntimeError("Pipeline finished without producing a result")
         return result
 
     def iter_analyze(
         self,
         video_path: str | Path,
         params: AnalysisParams | None = None,
-        thresholds: WelfareThresholds | None = None,
         preset: str = "balanced",
         should_cancel: Callable[[], bool] | None = None,
     ) -> Iterator[ProgressEvent | AnalysisResult]:
         """Run the pipeline, yielding progress events then the final result."""
         params = params or params_for_preset(preset)
-        thresholds = thresholds or WelfareThresholds()
+        yield ProgressEvent("probe", 0.0, "Opening video")
+        source = self.components.source_factory(video_path)
+        try:
+            yield from self._run(source, params, should_cancel)
+        finally:
+            source.close()
+
+    def _run(
+        self,
+        source: VideoReader,
+        params: AnalysisParams,
+        should_cancel: Callable[[], bool] | None,
+    ) -> Iterator[ProgressEvent | AnalysisResult]:
+        """Coordinate stages for an open source; iter_analyze owns its lifetime."""
         started = time.time()
         warnings: list[str] = []
 
@@ -145,9 +167,12 @@ class VideoAnalyzer:
                 stage=stage, progress=min(overall, 1.0), message=message, detail=detail
             )
 
-        # -- 1. probe ------------------------------------------------------
-        yield progress("probe", 0.0, "Opening video")
-        source = VideoSource(video_path)
+        selected = (
+            SelectedClasses(self.recognizer, params.action_classes)
+            if params.action_classes is not None
+            else None
+        )
+
         info = source.info
         yield progress(
             "probe",
@@ -171,14 +196,9 @@ class VideoAnalyzer:
         )
 
         # -- 2. detect + 3. track -------------------------------------------
-        tracker = BirdTracker(
-            iou_threshold=params.track_iou_threshold,
-            # ``track_max_age`` is expressed in source frames; the tracker advances only
-            # on detector frames, so preserve the meaning across presets.
-            max_age=max(1, int(np.ceil(params.track_max_age / params.detection_stride))),
-            min_hits=params.track_min_hits,
-        )
+        tracker = self.components.tracker_factory(params)
         frame_counts: list[tuple[float, int]] = []
+        dropped_boxes = 0
 
         total_detect_frames = max(1, len(range(0, limit, params.detection_stride)))
         done = 0
@@ -197,7 +217,10 @@ class VideoAnalyzer:
                 nms_threshold=params.nms_threshold,
                 box_padding=params.box_padding,
             )
-            for frame_index, (boxes, scores) in zip(indices, detections, strict=True):
+            for frame_index, raw in zip(indices, detections, strict=True):
+                detected = Detections.coerce(raw, invalid_boxes=params.invalid_boxes)
+                dropped_boxes += detected.dropped_count
+                boxes, scores = detected
                 t = source.time_of(frame_index)
                 frame_counts.append((t, len(boxes)))
                 tracker.update(frame_index, t, boxes, scores)
@@ -216,13 +239,13 @@ class VideoAnalyzer:
                 eta_s=round(eta, 1) if eta else None,
             )
 
+        if dropped_boxes:
+            warnings.append(f"Dropped {dropped_boxes} invalid detection boxes.")
+
         yield progress("track", 0.5, "Linking detections into tracks")
         tracks: list[Track] = tracker.finalize()
         if not tracks:
-            warnings.append(
-                "No birds were tracked. Check that the footage shows chickens and that the "
-                "detection confidence is not set too high."
-            )
+            warnings.append("No confirmed tracks were produced.")
         yield progress("track", 1.0, f"{len(tracks)} birds tracked", n_tracks=len(tracks))
 
         # -- 4. tracklet windows -------------------------------------------
@@ -231,7 +254,7 @@ class VideoAnalyzer:
         reject_totals: dict[str, int] = {}
         for i, track in enumerate(tracks):
             check_cancel()
-            built, rejects = build_tracklets(
+            built, rejects = self.components.tracklet_builder(
                 track, params, analyzed_info.fps, analyzed_info.width, analyzed_info.height
             )
             tracklets.extend(built)
@@ -246,14 +269,11 @@ class VideoAnalyzer:
             if reject_share > 0.5:
                 warnings.append(
                     f"{reject_share:.0%} of candidate clips were rejected as unstable or "
-                    f"wrongly sized ({reject_totals}). Birds may be too small or too "
-                    f"occluded in this footage for reliable action recognition."
+                    f"outside the crop geometry limits ({reject_totals})."
                 )
         if not tracklets:
             warnings.append(
-                "No clips passed the stability and size gates, so no actions could be "
-                "classified. Birds are likely too small in frame — a closer camera view or "
-                "a higher-resolution recording is needed."
+                "No clips passed the stability and size gates; no actions were classified."
             )
         yield progress(
             "clips",
@@ -265,9 +285,10 @@ class VideoAnalyzer:
 
         # -- 5. classify ----------------------------------------------------
         predictions: list[ActionPrediction] = []
+        classes: list[str] = []
         if tracklets:
-            recognizer = self.recognizer
-            classes = recognizer.classes
+            recognizer = selected or SelectedClasses(self.recognizer)
+            classes = list(recognizer.classes)
             batch_size = params.action_batch_size
             classify_started = time.time()
 
@@ -278,7 +299,9 @@ class VideoAnalyzer:
                 clips = []
                 kept: list[Tracklet] = []
                 for tracklet in batch:
-                    clip = extract_clip(source, tracklet, target_frames=recognizer.num_frames)
+                    clip = self.components.clip_extractor(
+                        source, tracklet, target_frames=recognizer.num_frames
+                    )
                     if clip is not None and clip.shape[0] > 0:
                         clips.append(clip)
                         kept.append(tracklet)
@@ -305,35 +328,41 @@ class VideoAnalyzer:
                 )
 
         # -- 6. metrics -----------------------------------------------------
-        yield progress("metrics", 0.2, "Computing welfare indicators")
+        yield progress("metrics", 0.2, "Computing descriptive statistics")
 
-        card = load_model_card(self.recognizer.checkpoint) if tracklets else {}
-        f1 = per_class_f1(card)
+        card = model_card(self.recognizer) if tracklets else {}
+        f1 = {k: v for k, v in per_class_f1(card).items() if k in classes}
         model_info = ModelInfo(
-            detector=str(self.detector.checkpoint.name),
-            action=str(self.recognizer.checkpoint.name) if tracklets else "not-run",
-            classes=list(self.recognizer.classes) if tracklets else [],
+            detector=component_name(self.detector),
+            action=component_name(self.recognizer) if tracklets else "not-run",
+            classes=classes,
             per_class_f1=f1,
-            per_class_support=per_class_support(card),
+            per_class_support={k: v for k, v in per_class_support(card).items() if k in classes},
         )
 
-        metrics = compute_metrics(
+        groups = (
+            self.settings.behaviour_groups
+            if params.behaviour_groups is None
+            else params.behaviour_groups
+        )
+        metrics = self.components.metrics(
             predictions,
             analyzed_info,
             frame_counts,
-            thresholds=thresholds,
-            per_class_f1=f1,
+            classes=classes,
+            behaviour_groups=groups,
             bin_seconds=_pick_bin_seconds(analyzed_info.duration_seconds),
         )
         if tracker.lost_track_count:
             warnings.append(
-                f"{tracker.lost_track_count} tracks were lost and re-identified as new birds. "
-                f"Per-bird figures are approximate; flock-level figures are unaffected."
+                f"{tracker.lost_track_count} confirmed tracks were lost; "
+                "later detections may receive new IDs. "
+                "Track IDs do not necessarily correspond to unique animals."
             )
 
         result = AnalysisResult(
             video=analyzed_info,
-            params=params.model_dump(),
+            params=params.model_dump() | {"behaviour_groups": groups},
             model=model_info,
             tracks=tracks,
             predictions=predictions,
@@ -342,7 +371,6 @@ class VideoAnalyzer:
             frame_counts=frame_counts,
             runtime_seconds=time.time() - started,
         )
-        source.close()
 
         yield progress("metrics", 1.0, "Done")
         yield result
@@ -375,8 +403,6 @@ def _to_prediction(
     mid = len(tracklet.boxes) // 2
     box = tuple(float(v) for v in tracklet.boxes[mid])
 
-    from khoroos.config import UNCERTAIN_LABEL
-
     return ActionPrediction(
         track_id=tracklet.track_id,
         start_seconds=tracklet.start_seconds,
@@ -393,16 +419,20 @@ def analyze_video(
     video_path: str | Path,
     preset: str = "balanced",
     params: AnalysisParams | None = None,
-    thresholds: WelfareThresholds | None = None,
     settings: Settings | None = None,
     on_progress: Callable[[ProgressEvent], None] | None = None,
+    *,
+    detector: Detector | None = None,
+    recognizer: VideoClassifier | None = None,
+    components: PipelineComponents | None = None,
 ) -> AnalysisResult:
     """Convenience wrapper: analyse one video with freshly loaded models."""
-    analyzer = VideoAnalyzer(settings=settings)
+    analyzer = VideoAnalyzer(
+        settings=settings, detector=detector, recognizer=recognizer, components=components
+    )
     return analyzer.analyze(
         video_path,
         params=params,
-        thresholds=thresholds,
         preset=preset,
         on_progress=on_progress,
     )

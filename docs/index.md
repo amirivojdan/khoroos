@@ -1,13 +1,15 @@
 # Khoroos
 
-![Khoroos, an open toolkit for poultry welfare analysis](assets/khoroos_banner.png)
+![Khoroos, a toolkit for poultry behavior analysis](assets/khoroos_banner.png)
 
-Khoroos is an open research toolkit for turning poultry-house video into individual bird
-tracks, behaviour timelines, and quantitative welfare indicators.
+Khoroos is a research toolkit for turning poultry-house video into individual bird
+tracks, behaviour timelines, and descriptive behavior statistics.
 
 It combines bird detection, multi-object tracking, stable clip extraction, action
-classification, and welfare summaries in one reproducible pipeline. You can use it through a
+classification, and behavior statistics in one reproducible pipeline. You can use it through a
 web interface, from the command line, or as a Python library.
+
+Licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0).
 
 ## What the pipeline produces
 
@@ -15,7 +17,7 @@ web interface, from the command line, or as a Python library.
 2. Detections are linked into tracks with stable identifiers.
 3. Each track is divided into short, stable single-bird clips.
 4. Clips are classified against the 15-behaviour ChickenAct ethogram.
-5. Results are summarized as time budgets, welfare indicators, alerts, and exportable tables.
+5. Results are summarized as time budgets, behavior statistics and exportable tables.
 
 ## Choose an interface
 
@@ -41,17 +43,12 @@ web interface, from the command line, or as a Python library.
     from khoroos import analyze_video
 
     result = analyze_video("farm.mp4", preset="balanced")
-    print(result.metrics["indicators"])
+    print(result.metrics["time_budget"])
     ```
 
     Integrate the analysis pipeline into notebooks, scripts, or other applications.
 
-!!! warning "Indicators are not diagnoses"
-
-    Khoroos flags patterns in the observed footage. Interpret those patterns with the recording
-    conditions, flock context, and model reliability in mind. See
-    [Interpreting results](guide/interpreting-results.md) before using outputs in a study or
-    operational decision.
-
-[Install Khoroos](getting-started.md){ .md-button .md-button--primary }
-[Read the user guide](guide/command-line.md){ .md-button }
+!!! note "Measurement scope"
+    Statistics summarize model-assigned labels on sampled track windows. Results include
+    observation duration, confidence, and processing notes. See
+    [Understanding the statistics](guide/interpreting-results.md) for definitions.

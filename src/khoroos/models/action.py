@@ -14,8 +14,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from khoroos.config import ACTION_CLASSES, Settings, get_settings
+from khoroos.config import Settings, get_settings
+from khoroos.interfaces import VideoClassifier
+from khoroos.models.metadata import labels_from_mapping
 from khoroos.models.registry import resolve_checkpoint
+from khoroos.models.selection import ClassSelection
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,8 @@ def sample_frame_indices(total_frames: int, num_frames: int) -> np.ndarray:
     Identical to the training-time sampler: when the clip is shorter than the model's
     window, the final frame is repeated rather than looping.
     """
+    if num_frames <= 0:
+        raise ValueError("num_frames must be positive")
     if total_frames <= 0:
         raise ValueError("Clip has no frames.")
     if total_frames >= num_frames:
@@ -38,37 +43,40 @@ def sample_frame_indices(total_frames: int, num_frames: int) -> np.ndarray:
     return np.concatenate([indices, pad])
 
 
-class ActionRecognizer:
-    """Classifies short single-bird clips into the 15-class ChickenAct ethogram."""
+class ActionRecognizer(VideoClassifier):
+    """Classifies clips using checkpoint labels, optionally selecting an ordered subset."""
 
     def __init__(
         self,
         checkpoint: str | Path | None = None,
         settings: Settings | None = None,
         device: str | None = None,
+        classes: list[str] | None = None,
     ) -> None:
         from transformers import AutoModelForVideoClassification, AutoVideoProcessor
 
-        self.settings = settings or get_settings()
+        self.settings = (settings or get_settings()).with_overrides(device=device)
         self.checkpoint = resolve_checkpoint("action", checkpoint, self.settings)
-        self.device = torch.device(device or self.settings.resolved_device())
+        self.device = torch.device(self.settings.resolved_device())
 
-        self.processor = AutoVideoProcessor.from_pretrained(str(self.checkpoint))
-        model = AutoModelForVideoClassification.from_pretrained(str(self.checkpoint))
+        self.processor = AutoVideoProcessor.from_pretrained(
+            str(self.checkpoint), local_files_only=True,
+        )
+        model = AutoModelForVideoClassification.from_pretrained(
+            str(self.checkpoint), local_files_only=True,
+        )
         self.model = model.to(self.device).eval()
 
         id2label = self.model.config.id2label
         self.id2label = {int(k): v for k, v in id2label.items()}
-        self.classes = [self.id2label[i] for i in sorted(self.id2label)]
-        if set(self.classes) != set(ACTION_CLASSES) or len(self.classes) != len(ACTION_CLASSES):
-            raise ValueError(
-                "The action checkpoint's id2label mapping does not match the 15-class "
-                "ChickenAct ethogram. Refusing to compute welfare metrics with incompatible "
-                f"labels: {self.classes!r}."
-            )
+        self.classes = labels_from_mapping(id2label)
+        self.selection = ClassSelection(self.classes, classes)
+        self.classes = self.selection.classes
         self.num_frames = int(
             getattr(self.model.config, "frames_per_clip", DEFAULT_FRAMES_PER_CLIP)
         )
+        if self.num_frames < 1:
+            raise ValueError("Checkpoint frames_per_clip must be positive")
 
     def _autocast(self):
         if self.settings.use_bf16 and self.device.type == "cuda":
@@ -99,18 +107,7 @@ class ActionRecognizer:
             outputs = self.model(**inputs)
 
         probs = torch.softmax(outputs.logits.float(), dim=-1)
-        return probs.cpu().numpy().astype(np.float32)
-
-    def classify_batched(
-        self, clips: list[torch.Tensor], batch_size: int = 4
-    ) -> np.ndarray:
-        """Classify many clips in fixed-size batches."""
-        if not clips:
-            return np.zeros((0, len(self.classes)), dtype=np.float32)
-        chunks = [
-            self.classify(clips[i : i + batch_size]) for i in range(0, len(clips), batch_size)
-        ]
-        return np.concatenate(chunks, axis=0)
+        return self.selection.apply(probs.cpu().numpy(), len(clips))
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return (

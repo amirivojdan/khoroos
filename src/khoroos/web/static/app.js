@@ -2,7 +2,7 @@
  *
  * Colour policy, applied throughout: the 15 behaviour classes exceed the safe
  * categorical ceiling, so identity colour is carried by the six *behaviour groups*
- * (comfort, locomotion, inactive, ingestive, foraging, other) and the class name is
+ * (maintenance, locomotion, inactive, ingestive, foraging, other) and the class name is
  * carried by labels, tooltips and tables. "Uncertain" is a neutral grey — it marks
  * absent information, so it is never given a series colour.
  */
@@ -31,17 +31,17 @@ const STAGES = [
   ['track', 'Following individuals'],
   ['clips', 'Selecting stable clips'],
   ['classify', 'Recognising actions'],
-  ['metrics', 'Computing indicators'],
+  ['metrics', 'Computing statistics'],
 ];
 
-const GROUP_SLOT = {
-  comfort: 1, locomotion: 2, inactive: 3, ingestive: 4, foraging: 5, other: 6,
-};
+let GROUP_SLOT = Object.create(null);
+let GROUP_LABEL = Object.create(null);
 
-const GROUP_LABEL = {
-  comfort: 'Comfort', locomotion: 'Locomotion', inactive: 'Inactive',
-  ingestive: 'Feeding & drinking', foraging: 'Foraging', other: 'Other',
-};
+function configureGroups(groups) {
+  const names = [...Object.keys(groups), 'ungrouped'];
+  GROUP_SLOT = Object.fromEntries(names.map((name, i) => [name, (i % 6) + 1]));
+  GROUP_LABEL = Object.fromEntries(names.map((name) => [name, prettyLabel(name)]));
+}
 
 // Tracking is identity, not behaviour: a bird keeps one trail colour while its action
 // box changes colour as classifications change.
@@ -60,11 +60,13 @@ function cssVar(name) {
 }
 
 function groupOf(label) {
-  if (!state.config || label === 'uncertain') return null;
-  for (const [group, members] of Object.entries(state.config.behaviour_groups)) {
+  if (label === 'uncertain') return null;
+  const groups = state.result?.metrics?.behaviour_groups ?? state.config?.behaviour_groups ?? {};
+  for (const [group, value] of Object.entries(groups)) {
+    const members = Array.isArray(value) ? value : value.members;
     if (members.includes(label)) return group;
   }
-  return null;
+  return 'ungrouped';
 }
 
 function colourFor(label) {
@@ -218,47 +220,6 @@ function renderBatchDefaults() {
   }
 }
 
-//: Copy for the alert thresholds, keyed by the field names WelfareThresholds defines.
-//: A field with no entry here still renders — the server owns the list, not this file.
-const THRESHOLD_COPY = {
-  min_comfort_share: ['Minimum comfort behaviour', 'Preening, dust bathing, wing flapping, stretching.'],
-  min_locomotion_share: ['Minimum locomotion', 'Walking and running. Low values can indicate leg problems.'],
-  max_inactive_share: ['Maximum inactivity', 'Resting and standing.'],
-  min_ingestive_share: ['Minimum feeding and drinking', ''],
-  min_observation_seconds: ['Minimum observation (bird-seconds)', 'Indicators below this are shown but never alerted on.'],
-  min_class_f1_for_alert: ['Minimum class reliability (F1)', 'Behaviours the model predicts less reliably do not raise alerts.'],
-};
-
-function renderThresholds() {
-  const container = $('#threshold-options');
-  container.innerHTML = '';
-  for (const [name, value] of Object.entries(state.config.thresholds || {})) {
-    const [title, description] = THRESHOLD_COPY[name] || [prettyLabel(name), ''];
-    const isShare = name.endsWith('_share') || name.endsWith('_f1_for_alert');
-
-    const row = document.createElement('div');
-    row.className = 'field-row';
-    row.innerHTML = `
-      <label for="thr-${name}">${title}</label>
-      <input id="thr-${name}" data-threshold="${name}" type="number"
-             min="0" ${isShare ? 'max="1" step="0.05"' : 'step="10"'} value="${value}">
-      ${description ? `<span class="hint">${description}</span>` : ''}`;
-    container.appendChild(row);
-  }
-}
-
-/** Collect only the thresholds the user actually moved, so defaults stay server-side. */
-function thresholdOverrides() {
-  const defaults = state.config.thresholds || {};
-  const overrides = {};
-  for (const input of document.querySelectorAll('[data-threshold]')) {
-    const name = input.dataset.threshold;
-    if (input.value === '' || Number(input.value) === defaults[name]) continue;
-    overrides[name] = Number(input.value);
-  }
-  return overrides;
-}
-
 // ---------------------------------------------------------------------------
 // Select screen — two-stage setup
 // ---------------------------------------------------------------------------
@@ -357,6 +318,8 @@ $('#start-btn').addEventListener('click', async () => {
   form.append('file', state.selection.file);
   const maxSeconds = $('#opt-max-seconds').value;
   if (maxSeconds) form.append('max_seconds', maxSeconds);
+  const actionClasses = $('#opt-action-classes').value.trim();
+  if (actionClasses) form.append('action_classes', actionClasses);
   form.append('min_confidence', $('#opt-min-conf').value);
   form.append('detection_confidence', $('#opt-det-conf').value);
   // Only sent when the user actually set one, so the preset's own value stands otherwise.
@@ -365,8 +328,6 @@ $('#start-btn').addEventListener('click', async () => {
     if (value) form.append(field, value);
   }
   form.append('render_overlay', $('#opt-overlay').checked ? 'true' : 'false');
-  const thresholds = thresholdOverrides();
-  if (Object.keys(thresholds).length) form.append('thresholds', JSON.stringify(thresholds));
 
   try {
     const job = await api('/jobs', { method: 'POST', body: form });
@@ -489,6 +450,7 @@ async function loadResult(jobId) {
 // ---------------------------------------------------------------------------
 
 function renderResults(result) {
+  configureGroups(result.metrics.behaviour_groups || {});
   const metrics = result.metrics || {};
   renderKpis(result, metrics);
   setupPlayer(result);
@@ -510,7 +472,6 @@ function escapeHtml(text) {
 }
 
 function renderKpis(result, metrics) {
-  const indicators = metrics.indicators || {};
   const budget = metrics.time_budget || {};
   const population = metrics.population || {};
 
@@ -521,24 +482,14 @@ function renderKpis(result, metrics) {
       note: `${population.mean ?? 0} on average in frame`,
     },
     {
-      label: 'Comfort behaviour',
-      value: fmtPct(indicators.comfort_index || 0),
-      note: 'share of observed bird-time',
+      label: 'Classified windows',
+      value: (result.predictions || []).length,
+      note: 'model predictions across tracks',
     },
     {
-      label: 'Locomotion',
-      value: fmtPct(indicators.locomotion_score || 0),
-      note: 'share of observed bird-time',
-    },
-    {
-      label: 'Inactive',
-      value: fmtPct(indicators.inactivity_ratio || 0),
-      note: 'share of observed bird-time',
-    },
-    {
-      label: 'Feeding & drinking',
-      value: fmtPct(indicators.ingestive_share || 0),
-      note: 'share of observed bird-time',
+      label: 'Confident observation',
+      value: fmtDuration(budget.confident_bird_seconds || 0),
+      note: 'bird-time above the confidence cutoff',
     },
     {
       label: 'Observed',
@@ -969,7 +920,7 @@ function drawStackTimeline() {
       timeline.classes.forEach((label, index) => {
         const value = bin.seconds[index];
         if (value <= 0) return;
-        const key = groupOf(label) || 'uncertain';
+        const key = label === 'uncertain' ? 'uncertain' : (groupOf(label) || 'ungrouped');
         byGroup.set(key, (byGroup.get(key) || 0) + value);
       });
 
@@ -1156,7 +1107,7 @@ function renderLegend() {
   items.push({ label: 'Uncertain', colour: cssVar('--series-none') });
   $('#legend-groups').innerHTML = items.map((item) =>
     `<span class="legend-item">
-       <span class="legend-swatch" style="background:${item.colour}"></span>${item.label}
+       <span class="legend-swatch" style="background:${item.colour}"></span>${escapeHtml(item.label)}
      </span>`).join('');
 }
 
@@ -1260,7 +1211,7 @@ function buildBudgetTable(entries) {
       <td><span class="swatch-cell">
         <span class="legend-swatch" style="background:${colourFor(label)}"></span>
         ${prettyLabel(label)}</span></td>
-      <td>${GROUP_LABEL[groupOf(label)] || '—'}</td>
+      <td>${escapeHtml(GROUP_LABEL[groupOf(label)] || '—')}</td>
       <td class="num">${fmtPct(values.share)}</td>
       <td class="num">${values.seconds ? values.seconds.toFixed(0) : '—'}</td>
       <td class="num">${values.n_windows || '—'}</td>
@@ -1571,6 +1522,7 @@ async function loadRecentJobs() {
 async function boot() {
   try {
     state.config = await api('/config');
+    configureGroups(state.config.behaviour_groups || {});
   } catch (error) {
     $('#model-warning').hidden = false;
     $('#model-warning').textContent = `Could not reach the Khoroos server: ${error.message}`;
@@ -1579,7 +1531,6 @@ async function boot() {
 
   state.preset = state.config.default_preset || 'balanced';
   renderPresets();
-  renderThresholds();
 
   $('#device-badge').hidden = false;
   $('#device-badge').textContent = state.config.device;

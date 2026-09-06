@@ -20,7 +20,9 @@ import torch
 from PIL import Image
 from torchvision.ops import nms
 
+from khoroos.annotations import Detections
 from khoroos.config import Settings, get_settings
+from khoroos.interfaces import Detector
 from khoroos.models.registry import resolve_checkpoint
 
 logger = logging.getLogger(__name__)
@@ -51,7 +53,7 @@ def to_pil(image: Image.Image | np.ndarray | torch.Tensor) -> Image.Image:
     return Image.fromarray(array).convert("RGB")
 
 
-class ChickenDetector:
+class ChickenDetector(Detector):
     """Batched single-class chicken detector."""
 
     def __init__(
@@ -62,12 +64,16 @@ class ChickenDetector:
     ) -> None:
         from transformers import AutoImageProcessor, AutoModelForObjectDetection
 
-        self.settings = settings or get_settings()
+        self.settings = (settings or get_settings()).with_overrides(device=device)
         self.checkpoint = resolve_checkpoint("detector", checkpoint, self.settings)
-        self.device = torch.device(device or self.settings.resolved_device())
+        self.device = torch.device(self.settings.resolved_device())
 
-        self.processor = AutoImageProcessor.from_pretrained(str(self.checkpoint))
-        model = AutoModelForObjectDetection.from_pretrained(str(self.checkpoint))
+        self.processor = AutoImageProcessor.from_pretrained(
+            str(self.checkpoint), local_files_only=True,
+        )
+        model = AutoModelForObjectDetection.from_pretrained(
+            str(self.checkpoint), local_files_only=True,
+        )
         self.model = model.to(self.device).eval()
         self.id2label = dict(self.model.config.id2label)
 
@@ -79,23 +85,22 @@ class ChickenDetector:
         return nullcontext()
 
     @staticmethod
-    def _pad_boxes(
-        boxes: torch.Tensor, padding: float, height: int, width: int
-    ) -> torch.Tensor:
+    def _pad_boxes(boxes: torch.Tensor, padding: float, height: int, width: int) -> torch.Tensor:
         """Grow each box by ``padding`` of its own size, clamped to the frame.
 
         The original implementation clamped x against the image height and y against the
         width; this version keeps the axes straight.
         """
-        if padding <= 0.0 or boxes.numel() == 0:
+        if boxes.numel() == 0:
             return boxes
+        padding = max(0.0, padding)
         widths = boxes[:, 2] - boxes[:, 0]
         heights = boxes[:, 3] - boxes[:, 1]
         padded = boxes.clone()
-        padded[:, 0] = torch.clamp(boxes[:, 0] - widths * padding, min=0)
-        padded[:, 1] = torch.clamp(boxes[:, 1] - heights * padding, min=0)
-        padded[:, 2] = torch.clamp(boxes[:, 2] + widths * padding, max=float(width))
-        padded[:, 3] = torch.clamp(boxes[:, 3] + heights * padding, max=float(height))
+        padded[:, 0] = torch.clamp(boxes[:, 0] - widths * padding, min=0, max=float(width))
+        padded[:, 1] = torch.clamp(boxes[:, 1] - heights * padding, min=0, max=float(height))
+        padded[:, 2] = torch.clamp(boxes[:, 2] + widths * padding, min=0, max=float(width))
+        padded[:, 3] = torch.clamp(boxes[:, 3] + heights * padding, min=0, max=float(height))
         return padded
 
     # -- public API --------------------------------------------------------
@@ -107,13 +112,13 @@ class ChickenDetector:
         confidence_threshold: float = 0.30,
         nms_threshold: float = 0.60,
         box_padding: float = 0.0,
-    ) -> list[tuple[np.ndarray, np.ndarray]]:
+    ) -> list[Detections]:
         """Detect chickens in a batch of frames.
 
         Accepts PIL images, ``(H, W, C)`` numpy arrays, or ``(C, H, W)`` uint8 tensors as
         produced by :class:`~khoroos.video.reader.VideoSource`.
 
-        Returns one ``(boxes, scores)`` pair per input image, where ``boxes`` is an
+        Returns one ``Detections`` per image, unpackable as ``(boxes, scores)``. Boxes are an
         ``(N, 4)`` float32 array in ``xyxy`` pixel coordinates.
         """
         if isinstance(images, torch.Tensor):
@@ -134,27 +139,27 @@ class ChickenDetector:
             outputs, threshold=confidence_threshold, target_sizes=target_sizes
         )
 
-        out: list[tuple[np.ndarray, np.ndarray]] = []
+        out: list[Detections] = []
         for index, result in enumerate(results):
             boxes = result["boxes"].float()
             scores = result["scores"].float()
 
-            if boxes.numel() == 0:
-                out.append(
-                    (np.zeros((0, 4), dtype=np.float32), np.zeros((0,), dtype=np.float32))
-                )
-                continue
-
+            labels = result["labels"]
+            # Invalid raw geometry must not enter NMS, even if clamping would hide it.
+            valid = torch.isfinite(boxes).all(dim=1) & (boxes[:, 2:] > boxes[:, :2]).all(dim=1)
+            dropped = int((~valid).sum())
+            boxes, scores, labels = boxes[valid], scores[valid], labels[valid]
             keep = nms(boxes, scores, iou_threshold=nms_threshold)
-            boxes, scores = boxes[keep], scores[keep]
+            boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
 
             height, width = pil_images[index].height, pil_images[index].width
             boxes = self._pad_boxes(boxes, box_padding, height, width)
-
+            inside = (boxes[:, 2:] > boxes[:, :2]).all(dim=1)
+            dropped += int((~inside).sum())
             out.append(
-                (
-                    boxes.cpu().numpy().astype(np.float32),
-                    scores.cpu().numpy().astype(np.float32),
+                Detections(
+                    boxes[inside].cpu().numpy(), scores[inside].cpu().numpy(),
+                    labels[inside].cpu().numpy(), dropped_count=dropped,
                 )
             )
         return out

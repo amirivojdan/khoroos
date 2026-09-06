@@ -1,9 +1,7 @@
-"""Welfare indicators derived from classified tracklets.
+"""Descriptive statistics derived from classified tracklets.
 
-Design rule throughout: Khoroos reports *indicators* with the sample size behind them and
-flags deviations from user-set thresholds. It never issues a welfare verdict. Every figure
-carries an ``n`` in bird-seconds so under-sampled numbers cannot be over-read, and alerting
-is suppressed both for thin samples and for classes the model is measurably weak at.
+Durations and proportions describe model-assigned observations. No domain conclusions,
+alert rules, or normative reference values are applied.
 """
 
 from __future__ import annotations
@@ -14,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from khoroos.config import BEHAVIOUR_GROUPS, UNCERTAIN_LABEL, WelfareThresholds
+from khoroos.config import BEHAVIOUR_GROUPS, UNCERTAIN_LABEL
 from khoroos.pipeline.types import ActionPrediction, VideoInfo
 
 logger = logging.getLogger(__name__)
@@ -96,13 +94,22 @@ def time_budget(predictions: list[ActionPrediction]) -> dict[str, Any]:
     }
 
 
-def group_shares(budget: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def group_shares(
+    budget: dict[str, Any],
+    classes: list[str] | None = None,
+    behaviour_groups: dict[str, list[str]] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Aggregate the class budget into ethological behaviour groups."""
     by_class = budget["by_class"]
     confident = budget["confident_bird_seconds"]
 
     out: dict[str, dict[str, Any]] = {}
-    for group, members in BEHAVIOUR_GROUPS.items():
+    groups = BEHAVIOUR_GROUPS if behaviour_groups is None else behaviour_groups
+    for group, members in groups.items():
+        if classes is not None:
+            members = tuple(m for m in members if m in classes)
+            if not members:
+                continue
         secs = sum(by_class.get(m, {}).get("seconds", 0.0) for m in members)
         out[group] = {
             "seconds": round(secs, 2),
@@ -184,7 +191,7 @@ def spatial_activity(
 ) -> dict[str, Any]:
     """Occupancy and dominant behaviour per spatial cell.
 
-    Surfaces crowding around feeders and drinkers, and dead zones birds avoid.
+    Counts classified windows by the center of their representative box.
     """
     cell_w = video.width / grid
     cell_h = video.height / grid
@@ -235,9 +242,7 @@ def bout_stats(predictions: list[ActionPrediction]) -> dict[str, Any]:
     A bout is a run of consecutive windows of the same behaviour within one track, so
     "10 short feeding visits" reads differently from "one long feeding period".
     """
-    intervals_by_track: dict[
-        int, list[tuple[ActionPrediction, float, float]]
-    ] = defaultdict(list)
+    intervals_by_track: dict[int, list[tuple[ActionPrediction, float, float]]] = defaultdict(list)
     for p, start, end in _effective_intervals(predictions):
         if not p.is_uncertain:
             intervals_by_track[p.track_id].append((p, start, end))
@@ -270,136 +275,26 @@ def bout_stats(predictions: list[ActionPrediction]) -> dict[str, Any]:
     }
 
 
-def evaluate_alerts(
-    groups: dict[str, dict[str, Any]],
-    budget: dict[str, Any],
-    thresholds: WelfareThresholds,
-    per_class_f1: dict[str, float] | None = None,
-) -> list[dict[str, Any]]:
-    """Flag indicators that fall outside user-set bounds.
-
-    Two guards keep this honest: nothing is flagged from a sample thinner than
-    ``min_observation_seconds``, and nothing is flagged from a behaviour group whose
-    member classes the model cannot reliably distinguish.
-    """
-    per_class_f1 = per_class_f1 or {}
-    observed = budget["confident_bird_seconds"]
-    alerts: list[dict[str, Any]] = []
-
-    if observed < thresholds.min_observation_seconds:
-        return [
-            {
-                "level": "info",
-                "code": "insufficient_data",
-                "message": (
-                    f"Only {observed:.0f} bird-seconds of confident observation; "
-                    f"indicators are shown but not evaluated against thresholds "
-                    f"(need {thresholds.min_observation_seconds:.0f}s)."
-                ),
-            }
-        ]
-
-    def group_is_reliable(group: str) -> bool:
-        """True when the group has no F1 data, or at least one member clears the bar."""
-        members = BEHAVIOUR_GROUPS[group]
-        known = [per_class_f1[m] for m in members if m in per_class_f1]
-        if not known:
-            return True
-        return max(known) >= thresholds.min_class_f1_for_alert
-
-    checks = [
-        ("comfort", "below", thresholds.min_comfort_share, "comfort_behaviour_low",
-         "Comfort behaviour (preening, dust bathing, wing flapping, stretching) is low, "
-         "which is associated with crowding, poor litter quality or stress."),
-        ("locomotion", "below", thresholds.min_locomotion_share, "locomotion_low",
-         "Locomotion is low. Combined with high inactivity this can indicate leg-health "
-         "or lameness problems in the flock."),
-        ("inactive", "above", thresholds.max_inactive_share, "inactivity_high",
-         "Inactivity is high. Consider heat stress, illness or leg-health problems."),
-        ("ingestive", "below", thresholds.min_ingestive_share, "ingestive_low",
-         "Feeding and drinking activity is low. Check feeder and drinker access."),
-    ]
-
-    for group, direction, limit, code, message in checks:
-        share = groups.get(group, {}).get("share", 0.0)
-        breached = share < limit if direction == "below" else share > limit
-        if not breached:
-            continue
-        if not group_is_reliable(group):
-            alerts.append(
-                {
-                    "level": "info",
-                    "code": f"{code}_suppressed",
-                    "message": (
-                        f"'{group}' crossed its threshold but the model's held-out F1 for "
-                        f"these classes is below {thresholds.min_class_f1_for_alert:.2f}; "
-                        f"not raising an alert."
-                    ),
-                    "group": group,
-                    "value": share,
-                }
-            )
-            continue
-        alerts.append(
-            {
-                "level": "warning",
-                "code": code,
-                "message": message,
-                "group": group,
-                "value": round(share, 4),
-                "threshold": limit,
-                "direction": direction,
-                "observed_seconds": observed,
-            }
-        )
-
-    uncertain = budget.get("uncertain_share", 0.0)
-    if uncertain > 0.5:
-        alerts.append(
-            {
-                "level": "warning",
-                "code": "high_uncertainty",
-                "message": (
-                    f"{uncertain:.0%} of observed bird-time could not be confidently "
-                    "classified. The footage may differ from the training data (camera "
-                    "angle, height, lighting, bird age). Treat the budget with caution."
-                ),
-                "value": round(uncertain, 4),
-            }
-        )
-
-    return alerts
-
-
 def compute_metrics(
     predictions: list[ActionPrediction],
     video: VideoInfo,
     frame_counts: list[tuple[float, int]],
-    thresholds: WelfareThresholds | None = None,
-    per_class_f1: dict[str, float] | None = None,
     bin_seconds: float = 5.0,
+    classes: list[str] | None = None,
+    behaviour_groups: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
-    """Compute the full welfare metric set for one analysed video."""
-    thresholds = thresholds or WelfareThresholds()
+    """Return descriptive summaries for any classifier vocabulary.
 
+    classes records the selected vocabulary; observed labels drive the statistics.
+    Behavior groups are configurable, descriptive aggregations; an empty mapping disables them.
+    """
     budget = time_budget(predictions)
-    groups = group_shares(budget)
-
     return {
         "time_budget": budget,
-        "behaviour_groups": groups,
-        "indicators": {
-            "comfort_index": groups["comfort"]["share"],
-            "locomotion_score": groups["locomotion"]["share"],
-            "inactivity_ratio": groups["inactive"]["share"],
-            "ingestive_share": groups["ingestive"]["share"],
-            "foraging_share": groups["foraging"]["share"],
-        },
+        "behaviour_groups": group_shares(budget, classes, behaviour_groups),
         "population": population_stats(frame_counts),
         "timeline": activity_timeline(predictions, video.duration_seconds, bin_seconds),
         "per_bird": per_bird_budgets(predictions),
         "bouts": bout_stats(predictions),
         "spatial": spatial_activity(predictions, video),
-        "alerts": evaluate_alerts(groups, budget, thresholds, per_class_f1),
-        "thresholds": thresholds.model_dump(),
     }

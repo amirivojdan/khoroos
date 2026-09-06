@@ -40,15 +40,7 @@ khoroos analyze farm.mp4 --output results/ \
   --set min_crop_size=120
 ```
 
-Override alert thresholds independently with `--threshold NAME=VALUE`:
-
-```bash
-khoroos analyze farm.mp4 --output results/ \
-  --threshold min_locomotion_share=0.2
-```
-
-Unknown names and invalid values fail with an error. Run `khoroos info` to inspect the current
-parameters, presets, and threshold defaults.
+Use `khoroos info` to inspect presets and checkpoint availability.
 
 ## Tune memory use
 

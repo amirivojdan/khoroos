@@ -7,10 +7,8 @@ import pytest
 from khoroos.config import (
     PRESETS,
     AnalysisParams,
-    WelfareThresholds,
     params_for_preset,
     parse_overrides,
-    thresholds_from_overrides,
 )
 
 
@@ -63,22 +61,6 @@ def test_string_values_are_coerced():
 # ---------------------------------------------------------------------------
 
 
-def test_thresholds_default_when_nothing_is_overridden():
-    assert thresholds_from_overrides() == WelfareThresholds()
-    assert thresholds_from_overrides({}) == WelfareThresholds()
-
-
-def test_thresholds_apply_only_the_named_override():
-    thresholds = thresholds_from_overrides({"min_comfort_share": 0.2})
-    assert thresholds.min_comfort_share == 0.2
-    assert thresholds.max_inactive_share == WelfareThresholds().max_inactive_share
-
-
-def test_unknown_threshold_is_rejected():
-    with pytest.raises(ValueError, match="unknown welfare threshold"):
-        thresholds_from_overrides({"min_comfort": 0.2})
-
-
 # ---------------------------------------------------------------------------
 # name=value parsing
 # ---------------------------------------------------------------------------
@@ -96,3 +78,50 @@ def test_parse_overrides_keeps_values_containing_equals():
 def test_parse_overrides_rejects_malformed_input(bad):
     with pytest.raises(ValueError, match="name=value"):
         parse_overrides([bad])
+
+
+@pytest.mark.parametrize("value", [3, {}, [""], ["feeding", "feeding"], ["uncertain"]])
+def test_invalid_action_class_lists_are_validation_errors(value):
+    with pytest.raises(ValueError, match="action_classes"):
+        AnalysisParams(action_classes=value)
+
+
+@pytest.mark.parametrize("device", ["banana", "cuda:-1", "cuda:x", "cpu:2", ""])
+def test_invalid_devices_rejected_at_creation_and_assignment(device):
+    from khoroos.config import Settings
+
+    with pytest.raises(ValueError, match="device"):
+        Settings(device=device)
+    settings = Settings(device="cpu")
+    with pytest.raises(ValueError, match="device"):
+        settings.device = device
+    assert settings.device == "cpu"
+
+
+@pytest.mark.parametrize("device", ["cpu", "auto", "mps", "cuda", "cuda:1"])
+def test_valid_device_syntax_without_loading_models(device):
+    from khoroos.config import Settings
+
+    assert Settings(device=device).device == device
+
+
+def test_settings_overrides_are_validated_copies():
+    from khoroos.config import Settings
+
+    original = Settings(device="cpu")
+    changed = original.with_overrides(device="cuda:1", behaviour_groups={"custom": ["a"]})
+    assert original.device == "cpu"
+    assert changed.device == "cuda:1"
+    assert "custom" not in original.behaviour_groups
+    with pytest.raises(ValueError):
+        original.with_overrides(device="banana")
+
+
+@pytest.mark.parametrize("groups", [{"a": ["x"], "b": ["x"]}, {"a": []}, {"uncertain": ["x"]}])
+def test_invalid_behavior_groups_rejected(groups):
+    with pytest.raises(ValueError):
+        AnalysisParams(behaviour_groups=groups)
+
+
+def test_group_overrides_parse_cli_json():
+    assert AnalysisParams(behaviour_groups='{"activity":["moving"]}').behaviour_groups == {"activity": ["moving"]}

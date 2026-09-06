@@ -17,7 +17,7 @@
   --text-muted: #82817a;
 
   /* Categorical — behaviour groups, fixed order, never cycled. */
-  --series-1: #2a78d6;  /* comfort    */
+  --series-1: #2a78d6;  /* maintenance */
   --series-2: #eb6834;  /* locomotion */
   --series-3: #1baf7a;  /* inactive   */
   --series-4: #eda100;  /* ingestive  */
@@ -782,7 +782,6 @@ body[data-screen="results"] .btn {
   font-weight: 700;
 }
 body[data-screen] .notice,
-body[data-screen] .alert,
 body[data-screen] .chip,
 body[data-screen] .tooltip {
   border-radius: 0;

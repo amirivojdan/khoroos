@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from bisect import bisect_right
 from collections import defaultdict
+from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 
@@ -16,6 +17,7 @@ import numpy as np
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
 from khoroos.config import UNCERTAIN_LABEL
+from khoroos.interfaces import VideoReader
 from khoroos.pipeline.types import AnalysisResult
 from khoroos.tracking.tracklets import interpolate_track
 from khoroos.video.reader import VideoSource
@@ -24,14 +26,34 @@ logger = logging.getLogger(__name__)
 
 #: Distinct, colour-blind-considerate palette; index by class order for stability.
 PALETTE = [
-    "#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4",
-    "#008300", "#4a3aa7", "#e34948", "#00a0b0", "#9b59b6",
-    "#7f8c8d", "#c0392b", "#16a085", "#d35400", "#2c3e50",
+    "#2a78d6",
+    "#eb6834",
+    "#1baf7a",
+    "#eda100",
+    "#e87ba4",
+    "#008300",
+    "#4a3aa7",
+    "#e34948",
+    "#00a0b0",
+    "#9b59b6",
+    "#7f8c8d",
+    "#c0392b",
+    "#16a085",
+    "#d35400",
+    "#2c3e50",
 ]
 UNCERTAIN_COLOUR = "#9aa3ad"
 TRACK_PALETTE = [
-    "#00c2e8", "#ffd166", "#ef476f", "#06d6a0", "#a78bfa",
-    "#f97316", "#84cc16", "#f472b6", "#38bdf8", "#facc15",
+    "#00c2e8",
+    "#ffd166",
+    "#ef476f",
+    "#06d6a0",
+    "#a78bfa",
+    "#f97316",
+    "#84cc16",
+    "#f472b6",
+    "#38bdf8",
+    "#facc15",
 ]
 TRAIL_SECONDS = 2.0
 
@@ -64,22 +86,38 @@ def render_overlay(
     result: AnalysisResult,
     output_path: str | Path,
     max_seconds: float | None = None,
+    *,
+    source_factory: Callable[[str | Path], VideoReader] | None = None,
 ) -> Path:
     """Draw tracked boxes and predicted actions onto the video.
 
     Each bird's box is coloured by the action predicted for the window it falls in, with
-    its track ID and confidence. Uncertain windows are drawn grey so viewers can see where
-    the model declined to commit.
+    its track ID and confidence. Uncertain windows are left unmarked. The reader factory
+    is shared with analysis when called through AnalysisRunner.
     """
     try:
-        import av
+        import av  # noqa: F401 — check availability before opening the reader
     except ImportError as exc:  # pragma: no cover - dependency is declared
         raise RuntimeError("PyAV is required to render annotated video.") from exc
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    source = VideoSource(video_path)
+    source = (source_factory or VideoSource)(video_path)
+    try:
+        return _render_source(source, result, output_path, max_seconds)
+    finally:
+        source.close()
+
+
+def _render_source(
+    source: VideoReader,
+    result: AnalysisResult,
+    output_path: Path,
+    max_seconds: float | None,
+) -> Path:
+    import av
+
     classes = list(result.model.classes)
 
     # Index predictions by track so the per-frame lookup is a bisect, not a scan.
@@ -111,24 +149,24 @@ def render_overlay(
                 (track.track_id, tuple(float(value) for value in box))
             )
 
-    fps = source.fps
-    limit = source.num_frames
+    fps = source.info.fps
+    limit = source.info.num_frames
     if max_seconds is not None:
         limit = min(limit, int(max_seconds * fps))
 
-    font = _load_font(max(14, source.width // 90))
-    small_font = _load_font(max(12, source.width // 110))
+    font = _load_font(max(14, source.info.width // 90))
+    small_font = _load_font(max(12, source.info.width // 110))
     trail_frames = max(1, int(round(TRAIL_SECONDS * fps)))
     trail_step = max(1, int(round(fps / 8)))
 
     container = av.open(str(output_path), mode="w", options={"movflags": "+faststart"})
-    stream = container.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
-    stream.width = source.width
-    stream.height = source.height
-    stream.pix_fmt = "yuv420p"
-    stream.options = {"crf": "23", "preset": "veryfast"}
-
     try:
+        stream = container.add_stream("libx264", rate=Fraction(fps).limit_denominator(1001))
+        stream.width = source.info.width
+        stream.height = source.info.height
+        stream.pix_fmt = "yuv420p"
+        stream.options = {"crf": "23", "preset": "veryfast"}
+
         for start in range(0, limit, 32):
             indices = list(range(start, min(start + 32, limit)))
             frames = source.get_frames(indices)
@@ -183,7 +221,7 @@ def render_overlay(
 
                     text_box = draw.textbbox((0, 0), label, font=small_font)
                     text_width = text_box[2] - text_box[0]
-                    label_x = max(0.0, min(x1, source.width - text_width - 10))
+                    label_x = max(0.0, min(x1, source.info.width - text_width - 10))
                     label_y = max(0.0, y1 - 18)
                     draw.rectangle(
                         (label_x, label_y, label_x + text_width + 10, label_y + 17),
@@ -208,7 +246,6 @@ def render_overlay(
             container.mux(packet)
     finally:
         container.close()
-        source.close()
 
     logger.info("Wrote annotated video to %s", output_path)
     return output_path

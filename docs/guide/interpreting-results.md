@@ -1,49 +1,45 @@
-# Interpreting results
+# Understanding the statistics
 
-Khoroos reports observations and indicators, not clinical or welfare diagnoses. Its outputs are
-most useful when interpreted alongside flock age, breed, housing, camera placement, recording
-time, and environmental measurements.
+Khoroos extracts measurements from detections, tracks, and model-assigned behavior labels.
+It does not infer welfare status or recommend interventions.
 
-## Behaviour groups
+## Duration and proportions
 
-| Group | Behaviours |
-| --- | --- |
-| Comfort | preening, dust bathing, wing flapping, stretching, body shaking |
-| Locomotion | walking, running |
-| Inactive | resting, standing |
-| Feeding and drinking | feeding, drinking |
-| Foraging | litter pecking, litter scratching |
-| Other | head scratching, pooping |
+`time_budget.total_bird_seconds` is the combined observation duration across tracks.
+Overlapping classification windows split their overlap halfway between their centers, so
+budgets do not count overlapping bird-time twice. Gaps remain unobserved.
 
-## Read quality signals first
+Each class has a duration, a share of all observed time, a share of confidently labeled time,
+and a window count. Uncertain time remains a separate category. Proportions describe the
+sampled track windows, not the entire flock or all frames in a recording.
 
-Before interpreting an indicator, check:
+## Counts and bouts
 
-1. **Uncertain share.** A large uncertain share can mean the footage differs from the model's
-   training data or that birds are difficult to see.
-2. **Observation time.** Every budget is based on bird-seconds. Short recordings can produce
-   unstable shares and do not trigger alerts below the configured minimum.
-3. **Warnings.** High clip rejection, no tracks, or small and occluded birds are reported in the
-   result warnings.
-4. **Per-class reliability.** Rare actions can be less reliable than common behaviours. Alerts
-   are suppressed when reported class reliability is below the configured gate.
-5. **Visual agreement.** Review several representative predictions against the source footage.
+Population statistics summarize raw detections on sampled frames. Track count is the number
+of confirmed trajectories, not a verified count of unique animals.
 
-## Time budgets
+Bouts combine adjacent same-label intervals within a track. Reported bout counts and durations
+depend on the window size, sampling stride, confidence cutoff, and tracking continuity.
 
-A time budget is the share of classified bird-time assigned to each behaviour. Keep uncertain
-time visible: reporting only the confident subset can make weak footage appear more conclusive
-than it is.
+## Spatial summaries
 
-## Welfare indicators and alerts
+The spatial grid counts classified windows by their representative box centers and reports
+the dominant predicted behavior in each occupied cell. Counts are window counts, not seconds
+of occupancy. No interpretation is attached to the spatial distribution.
 
-Indicators aggregate related behaviours, such as locomotion or comfort activity. An alert means
-an indicator crossed a configured threshold after observation-time and reliability checks. It
-does not identify a cause. Compare runs captured under consistent conditions and investigate
-changes using additional observations.
+## Model metadata and processing notes
 
-## Track-level results
+Confidence, uncertain share, and observation duration document how measurements were produced.
+Per-class evaluation F1 and test support are included only when supplied in a checkpoint's
+`model_card.json` or by an injected classifier; a Hugging Face README alone does not supply
+these values. Processing notes report
+missing tracks, rejected clips, and lost trajectories. They do not produce domain alerts.
 
-Per-bird output is approximate because identities may switch during occlusion. Use it to locate
-examples and explore patterns. Prefer flock-level measures for formal reporting unless identity
-quality has been independently validated for the recording setup.
+## Schema migration
+
+Result schema **2.0** removes `metrics.indicators`, `metrics.alerts`, and `metrics.thresholds`.
+Descriptive behavior groups use `maintenance` in place of `comfort`.
+`khoroos.statistics` replaces `khoroos.welfare`; update metrics and export imports.
+`WelfareThresholds`, `thresholds_from_overrides`, the `thresholds` Python argument, and the
+CLI `--threshold` option have been removed. Custom metrics callables now receive only
+`classes`, `behaviour_groups`, and `bin_seconds` as keyword options after predictions, video, and frame counts.
