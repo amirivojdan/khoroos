@@ -2,15 +2,22 @@
 
 ## Set up the environment
 
-From the repository root, install the test, web, and documentation extras:
+Clone the repository and install the test, web, and documentation extras:
 
 ```bash
+git clone https://github.com/amirivojdan/khoroos.git
+cd khoroos
 uv sync --locked --extra dev --extra web --extra docs
 uv run pytest
 uv run ruff check src tests
 ```
 
 Tests use stub models and generated videos; they do not need downloaded weights.
+
+GitHub Actions runs `.github/workflows/test.yml` on pushes and pull requests, testing
+Python 3.12 and 3.14 on Ubuntu with the locked dependencies. Inference uses CPU, and Hub
+access is disabled during tests. The Python 3.12 job also runs Ruff and the strict docs build.
+You can start the workflow manually from **Actions → Tests → Run workflow**.
 
 See [Publish to PyPI](publishing.md) for Trusted Publisher setup and the release process.
 

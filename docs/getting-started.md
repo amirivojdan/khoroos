@@ -7,15 +7,15 @@ accelerator; CPU inference is available but the action model is slow on CPU.
 
 ## Install
 
-Install the command-line tool and web interface from this repository:
+Install the command-line tool and web interface from [PyPI](https://pypi.org/project/khoroos/):
 
 ```bash
-git clone https://github.com/amirivojdan/khoroos.git
-cd khoroos
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ".[web]"
+python -m pip install "khoroos[web]"
 ```
+
+For a source installation, see [Development](development.md).
 
 The default [detector](https://huggingface.co/amirivojdan/chicken_rtdetrv2) and
 [action classifier](https://huggingface.co/amirivojdan/chicken_vjepa2_action) are public.

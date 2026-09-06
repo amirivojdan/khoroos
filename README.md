@@ -2,6 +2,14 @@
   <img src="https://raw.githubusercontent.com/amirivojdan/khoroos/main/khoroos_banner.png" alt="Khoroos: poultry behavior analysis" width="100%">
 </p>
 
+<p align="center">
+  <a href="https://github.com/amirivojdan/khoroos/actions/workflows/test.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/amirivojdan/khoroos/test.yml?branch=main&amp;label=tests&amp;color=00A693"></a>
+  <a href="https://pypi.org/project/khoroos/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/khoroos?color=00A693"></a>
+  <a href="https://github.com/amirivojdan/khoroos/actions/workflows/publish.yml"><img alt="PyPI publishing workflow" src="https://img.shields.io/github/actions/workflow/status/amirivojdan/khoroos/publish.yml?label=publish&amp;color=00A693"></a>
+  <a href="https://pypi.org/project/khoroos/"><img alt="Python 3.12 and newer" src="https://img.shields.io/badge/python-3.12%2B-00A693"></a>
+  <a href="https://github.com/amirivojdan/khoroos/blob/main/LICENSE"><img alt="PolyForm Noncommercial License 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20NC%201.0.0-00A693"></a>
+</p>
+
 Khoroos turns poultry videos into bird tracks, behavior timelines, and descriptive statistics.
 Use it to measure how observed birds spend their time, compare activity across a recording,
 and export data for further analysis.
@@ -25,11 +33,9 @@ Developed at the [UT Smart Agriculture Lab](https://www.ut-smartagriculture.com/
 Requires Python 3.12+ and FFmpeg. A GPU is recommended for inference.
 
 ```bash
-git clone https://github.com/amirivojdan/khoroos.git
-cd khoroos
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install ".[web]"
+python -m pip install "khoroos[web]"
 khoroos models download
 khoroos ui
 ```
@@ -46,6 +52,8 @@ the results when the run finishes.
 With Docker and the NVIDIA Container Toolkit installed:
 
 ```bash
+git clone https://github.com/amirivojdan/khoroos.git
+cd khoroos
 docker compose up --build
 ```
 
@@ -128,6 +136,8 @@ Follow the [extension guide](https://github.com/amirivojdan/khoroos/blob/main/do
 [configuration guide](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/configuration.md) for devices, model sources, and cache paths.
 
 ## Development
+
+From a source checkout:
 
 ```bash
 uv sync --locked --extra web --extra dev --extra docs
