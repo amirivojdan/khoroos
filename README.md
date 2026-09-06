@@ -2,10 +2,7 @@
   <img src="khoroos_banner.png" alt="Khoroos: poultry behavior analysis" width="100%">
 </p>
 
-Khoroos extracts bird tracks, behavior timelines, and descriptive statistics from poultry
-videos. It detects chickens with RT-DETRv2, tracks them across frames, and classifies
-single-bird clips with V-JEPA2. Outputs include time budgets, behavior bouts, detection counts,
-and spatial summaries.
+Khoroos is an open research toolkit for video-based poultry behavior analysis. It turns poultry-house footage into individual bird trajectories, behavior timelines, and quantitative welfare statistics.
 
 Developed at the [UT Smart Agriculture Lab](https://www.ut-smartagriculture.com/).
 
