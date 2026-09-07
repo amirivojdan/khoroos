@@ -177,6 +177,41 @@ const PRESET_COPY = {
   thorough: ['Thorough', 'Every frame, half-second steps. Slowest, most temporal detail.'],
 };
 
+function renderBehaviorOptions() {
+  const container = $('#opt-action-classes');
+  const classes = state.config.classes || [];
+  container.replaceChildren();
+  $('#action-classes-actions').hidden = !classes.length;
+  $('#action-classes-hint').textContent = classes.length
+    ? 'Choose the behaviors to include. Select at least one.'
+    : 'The model’s behavior list is unavailable. All model behaviors will be included; reload after the model is installed to choose a subset.';
+  for (const name of classes) {
+    const option = document.createElement('label');
+    option.className = 'behavior-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = name;
+    input.checked = true;
+    const label = document.createElement('span');
+    label.textContent = prettyLabel(name);
+    option.append(input, label);
+    container.appendChild(option);
+  }
+}
+
+function selectedBehaviorClasses() {
+  return Array.from($('#opt-action-classes').querySelectorAll('input:checked'),
+    (input) => input.value);
+}
+
+for (const [selector, checked] of [['#select-all-behaviors', true], ['#clear-behaviors', false]]) {
+  $(selector).addEventListener('click', () => {
+    $('#opt-action-classes').querySelectorAll('input').forEach((input) => {
+      input.checked = checked;
+    });
+  });
+}
+
 function renderPresets() {
   const container = $('#preset-options');
   container.innerHTML = '';
@@ -308,6 +343,14 @@ $('#change-video').addEventListener('click', () => {
 
 $('#start-btn').addEventListener('click', async () => {
   if (!state.selection) return;
+  const actionClasses = selectedBehaviorClasses();
+  if (state.config?.classes?.length && !actionClasses.length) {
+    $('#start-error').textContent = 'Select at least one behavior to analyze.';
+    $('#start-error').hidden = false;
+    $('#opt-action-classes').closest('details').open = true;
+    $('#opt-action-classes input').focus();
+    return;
+  }
   const button = $('#start-btn');
   button.disabled = true;
   button.textContent = 'Starting…';
@@ -318,8 +361,7 @@ $('#start-btn').addEventListener('click', async () => {
   form.append('file', state.selection.file);
   const maxSeconds = $('#opt-max-seconds').value;
   if (maxSeconds) form.append('max_seconds', maxSeconds);
-  const actionClasses = $('#opt-action-classes').value.trim();
-  if (actionClasses) form.append('action_classes', actionClasses);
+  if (actionClasses.length) form.append('action_classes', actionClasses.join(','));
   form.append('min_confidence', $('#opt-min-conf').value);
   form.append('detection_confidence', $('#opt-det-conf').value);
   // Only sent when the user actually set one, so the preset's own value stands otherwise.
@@ -1531,6 +1573,8 @@ async function boot() {
 
   state.preset = state.config.default_preset || 'balanced';
   renderPresets();
+
+  renderBehaviorOptions();
 
   $('#device-badge').hidden = false;
   $('#device-badge').textContent = state.config.device;

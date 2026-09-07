@@ -10,6 +10,12 @@ Open `http://127.0.0.1:8000`, choose a video, select a detail level, and start t
 Progress updates appear while the pipeline detects, tracks, classifies, and summarizes the
 footage.
 
+Under advanced options, **Behaviors of interest** lists the active classifier's behaviors
+as checkboxes. All are selected by default; clear the selection and click the behaviors
+you want, or uncheck those you do not need. Select at least one behavior. If model metadata
+is not installed yet, analysis includes all behaviors; reload after the first analysis to
+make the choices available.
+
 ## Review results
 
 The results page pairs the video with a behaviour timeline. Select a point on the timeline to

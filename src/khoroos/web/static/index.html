@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Khoroos — Poultry Behavior Statistics</title>
 <link rel="icon" href="/khoroos.png" type="image/png">
-  <link rel="stylesheet" href="/styles.css?v=responsive-33">
+  <link rel="stylesheet" href="/styles.css?v=responsive-34">
 </head>
 <body data-screen="select" data-select-view="landing">
 
@@ -154,12 +154,15 @@
           </div>
         </fieldset>
 
-        <div class="field-row">
-          <label for="opt-action-classes">Behaviors of interest</label>
-          <input id="opt-action-classes" type="text" placeholder="All behaviors">
-          <span class="hint">Optional comma-separated labels, e.g. feeding, drinking.
-            Leave blank to include all model classes.</span>
-        </div>
+        <fieldset class="field" aria-describedby="action-classes-hint">
+          <legend>Behaviors of interest</legend>
+          <div id="action-classes-actions" class="behavior-actions" hidden>
+            <button id="select-all-behaviors" type="button">Select all</button>
+            <button id="clear-behaviors" type="button">Clear</button>
+          </div>
+          <div id="opt-action-classes" class="behavior-options"></div>
+          <p id="action-classes-hint" class="hint" role="status">Loading available behaviors…</p>
+        </fieldset>
 
         <div class="field-row field-check">
           <input id="opt-overlay" type="checkbox">
@@ -306,6 +309,6 @@
 
 </main>
 
-<script src="/app.js?v=responsive-12"></script>
+<script src="/app.js?v=responsive-13"></script>
 </body>
 </html>

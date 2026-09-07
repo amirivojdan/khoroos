@@ -250,6 +250,11 @@ main { max-width: 1240px; margin: 0 auto; padding: 28px 20px 80px; }
   background: var(--surface-1); color: var(--text-primary); max-width: 190px;
 }
 .field-check { flex-direction: row; align-items: center; gap: 8px; }
+.behavior-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.behavior-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; }
+.behavior-option { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--border); cursor: pointer; font-size: 0.82rem; }
+.behavior-option:has(input:checked) { background: var(--surface-2); }
+.behavior-option input { accent-color: var(--text-primary); flex-shrink: 0; }
 
 .recent-list { display: flex; flex-direction: column; gap: 6px; }
 .recent-item {
