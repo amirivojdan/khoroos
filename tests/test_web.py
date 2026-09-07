@@ -56,6 +56,7 @@ def test_config_endpoint_describes_the_ui(stub_client):
     assert len(payload["classes"]) == 15
     assert "maintenance" in payload["behaviour_groups"]
     assert "thresholds" not in payload
+    assert set(payload["tracklet_directories"]) == {"raw", "classified"}
 
 
 def test_static_index_is_served(client):
@@ -64,8 +65,8 @@ def test_static_index_is_served(client):
     assert "Khoroos" in response.text
     assert 'class="player-stage"' in response.text
     assert 'id="player-overlay"' in response.text
-    assert "styles.css?v=responsive-34" in response.text
-    assert "app.js?v=responsive-13" in response.text
+    assert "styles.css?v=responsive-35" in response.text
+    assert "app.js?v=responsive-14" in response.text
 
 
 def test_select_screen_uses_a_single_video_dropzone(client):
@@ -413,6 +414,53 @@ def test_duplicate_classes_rejected_before_job_creation(client, synthetic_video)
         data={"server_path": str(synthetic_video), "action_classes": "feeding,feeding"},
     )
     assert response.status_code == 400
+
+
+def test_tracklet_export_directories_are_selected_per_job(stub_client, synthetic_video, tmp_path):
+    root = tmp_path / "my clips"
+    response = stub_client.post("/api/jobs", data={
+        "server_path": str(synthetic_video),
+        "save_raw_tracklets": "true",
+        "raw_tracklets_dir": str(root),
+        "save_classified_tracklets": "true",
+        "preset": "fast",
+    })
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    status = wait_for(stub_client, job_id, {"completed", "failed"})
+    assert status["state"] == "completed", status.get("error")
+    params = stub_client.get(f"/api/jobs/{job_id}/result").json()["params"]
+    assert params["raw_tracklets_dir"] == str(root)
+    default = stub_client.app.state.settings.cache_dir / "tracklets" / "classified"
+    assert params["classified_tracklets_dir"] == str(default)
+    assert list(root.rglob("*.mp4"))
+    assert list(default.rglob("*.mp4"))
+    assert stub_client.delete(f"/api/jobs/{job_id}").status_code == 200
+    assert list(root.rglob("*.mp4"))  # retained exports are independent of job cleanup
+    assert list(default.rglob("*.mp4"))
+
+
+def test_tracklet_path_is_ignored_when_checkbox_is_off(stub_client, synthetic_video, tmp_path):
+    blocked = tmp_path / "a file"
+    blocked.write_text("not a directory")
+    response = stub_client.post("/api/jobs", data={
+        "server_path": str(synthetic_video), "raw_tracklets_dir": str(blocked),
+    })
+    assert response.status_code == 200
+    job = stub_client.app.state.jobs.get(response.json()["job_id"])
+    assert job.params.raw_tracklets_dir is None
+
+
+def test_invalid_tracklet_directory_rejected_before_upload(client, synthetic_video, tmp_path):
+    blocked = tmp_path / "a file"
+    blocked.write_text("not a directory")
+    with synthetic_video.open("rb") as handle:
+        response = client.post("/api/jobs", data={
+            "save_raw_tracklets": "true", "raw_tracklets_dir": str(blocked / "child"),
+        }, files={"file": ("farm.mp4", handle, "video/mp4")})
+    assert response.status_code == 400
+    assert "tracklet directory" in response.json()["detail"]
+    assert not (client.app.state.settings.jobs_dir / "uploads").exists()
 
 
 def test_web_exposes_statistics_without_interpretation_controls(client):

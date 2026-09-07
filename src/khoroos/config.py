@@ -137,6 +137,17 @@ class AnalysisParams(BaseModel):
         0.50, ge=0.0, le=1.0, description="Below this the prediction is reported as 'uncertain'."
     )
 
+    #: Optional export roots. Each analysis creates a unique subdirectory in each root.
+    raw_tracklets_dir: str | None = None
+    classified_tracklets_dir: str | None = None
+
+    @field_validator("raw_tracklets_dir", "classified_tracklets_dir")
+    @classmethod
+    def check_tracklet_directory(cls, value):
+        if value is not None and (not value.strip() or "\x00" in value):
+            raise ValueError("Tracklet directory must be a nonempty path")
+        return value
+
     # -- limits ------------------------------------------------------------
     max_duration_seconds: float | None = Field(
         None, gt=0.0, description="Analyse only the first N seconds. None = whole video."

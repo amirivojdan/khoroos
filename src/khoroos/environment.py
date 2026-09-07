@@ -72,4 +72,10 @@ def describe_environment(
         "models": models,
         "max_upload_mb": settings.max_upload_mb,
         "cache_dir": str(settings.cache_dir),
+        "tracklet_directories": {
+            "raw": str((settings.cache_dir / "tracklets" / "raw").expanduser().resolve()),
+            "classified": str(
+                (settings.cache_dir / "tracklets" / "classified").expanduser().resolve()
+            ),
+        },
     }

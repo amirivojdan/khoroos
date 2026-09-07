@@ -34,6 +34,7 @@ from khoroos.pipeline.types import (
     Tracklet,
     VideoInfo,
 )
+from khoroos.video.tracklet_export import TrackletExporter
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,7 @@ class VideoAnalyzer:
         )
 
         info = source.info
+        tracklet_exporter = TrackletExporter(params, info.filename)
         yield progress(
             "probe",
             1.0,
@@ -298,19 +300,30 @@ class VideoAnalyzer:
                 batch = tracklets[start : start + batch_size]
                 clips = []
                 kept: list[Tracklet] = []
-                for tracklet in batch:
+                saved_raw = []
+                clip_indices = []
+                for offset, tracklet in enumerate(batch):
+                    check_cancel()
                     clip = self.components.clip_extractor(
                         source, tracklet, target_frames=recognizer.num_frames
                     )
                     if clip is not None and clip.shape[0] > 0:
                         clips.append(clip)
                         kept.append(tracklet)
+                        index = start + offset
+                        clip_indices.append(index)
+                        saved_raw.append(tracklet_exporter.save("raw", index, tracklet, clip))
 
                 if clips:
                     probs = recognizer.classify(clips)
-                    for tracklet, row in zip(kept, probs, strict=True):
-                        predictions.append(
-                            _to_prediction(tracklet, row, classes, params.min_confidence)
+                    for index, tracklet, clip, raw_path, row in zip(
+                        clip_indices, kept, clips, saved_raw, probs, strict=True
+                    ):
+                        check_cancel()
+                        prediction = _to_prediction(tracklet, row, classes, params.min_confidence)
+                        predictions.append(prediction)
+                        tracklet_exporter.save(
+                            "classified", index, tracklet, clip, prediction, raw_path
                         )
 
                 done_clips = min(start + batch_size, len(tracklets))
@@ -362,7 +375,10 @@ class VideoAnalyzer:
 
         result = AnalysisResult(
             video=analyzed_info,
-            params=params.model_dump() | {"behaviour_groups": groups},
+            params=params.model_dump() | {
+                "behaviour_groups": groups,
+                "tracklet_exports": tracklet_exporter.directories,
+            },
             model=model_info,
             tracks=tracks,
             predictions=predictions,

@@ -255,6 +255,15 @@ main { max-width: 1240px; margin: 0 auto; padding: 28px 20px 80px; }
 .behavior-option { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 10px; border: 1px solid var(--border); cursor: pointer; font-size: 0.82rem; }
 .behavior-option:has(input:checked) { background: var(--surface-2); }
 .behavior-option input { accent-color: var(--text-primary); flex-shrink: 0; }
+.tracklet-storage { margin-top: 18px; }
+.directory-input { display: flex; gap: 8px; }
+.directory-input input { flex: 1; min-width: 0; padding: 8px; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-primary); font: inherit; }
+#directory-picker { width: min(560px, calc(100% - 32px)); max-height: 85vh; overflow: auto; padding: 20px; border: 1px solid var(--border-strong); background: var(--surface-1); color: var(--text-primary); }
+#directory-picker::backdrop { background: rgb(0 0 0 / 50%); }
+#directory-picker .directory-input { margin: 10px 0; }
+.directory-list { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; margin: 12px 0; }
+.directory-entry { text-align: left; overflow-wrap: anywhere; }
+.directory-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 .recent-list { display: flex; flex-direction: column; gap: 6px; }
 .recent-item {

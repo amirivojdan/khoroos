@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Khoroos — Poultry Behavior Statistics</title>
 <link rel="icon" href="/khoroos.png" type="image/png">
-  <link rel="stylesheet" href="/styles.css?v=responsive-34">
+  <link rel="stylesheet" href="/styles.css?v=responsive-35">
 </head>
 <body data-screen="select" data-select-view="landing">
 
@@ -169,6 +169,36 @@
           <label for="opt-overlay">Also render an annotated video (slower)</label>
         </div>
 
+        <fieldset class="field tracklet-storage">
+          <legend>Save tracklet clips</legend>
+          <p class="hint">Save cropped action clips as MP4s on the machine running Khoroos.
+            Each analysis gets its own folder.</p>
+          <div class="field-row field-check">
+            <input id="opt-save-raw-tracklets" type="checkbox" aria-controls="raw-tracklets-options" aria-expanded="false">
+            <label for="opt-save-raw-tracklets">Save raw tracklets</label>
+          </div>
+          <div id="raw-tracklets-options" class="field-row" hidden>
+            <label for="opt-raw-tracklets-dir">Raw tracklet directory</label>
+            <div class="directory-input">
+              <input id="opt-raw-tracklets-dir" type="text" spellcheck="false" aria-describedby="raw-tracklets-hint">
+              <button class="btn btn-small" type="button" data-directory-picker="raw">Browse…</button>
+            </div>
+            <span id="raw-tracklets-hint" class="hint">Cropped clips before classification, with source times and track IDs.</span>
+          </div>
+          <div class="field-row field-check">
+            <input id="opt-save-classified-tracklets" type="checkbox" aria-controls="classified-tracklets-options" aria-expanded="false">
+            <label for="opt-save-classified-tracklets">Save classified tracklets</label>
+          </div>
+          <div id="classified-tracklets-options" class="field-row" hidden>
+            <label for="opt-classified-tracklets-dir">Classified tracklet directory</label>
+            <div class="directory-input">
+              <input id="opt-classified-tracklets-dir" type="text" spellcheck="false" aria-describedby="classified-tracklets-hint">
+              <button class="btn btn-small" type="button" data-directory-picker="classified">Browse…</button>
+            </div>
+            <span id="classified-tracklets-hint" class="hint">Clips sorted into behavior folders, with prediction confidence and metadata. Low-confidence clips go into “uncertain”.</span>
+          </div>
+        </fieldset>
+
 
       </details>
 
@@ -295,6 +325,7 @@
     <div class="card-head"><h2>Export</h2></div>
     <p class="card-sub">Everything below covers the full analysis, not just what is on screen.</p>
     <div id="export-links" class="export-links"></div>
+    <div id="tracklet-export-paths" class="hint"></div>
     <details class="advanced">
       <summary>Analysis settings used</summary>
       <div id="params-dump" class="table-wrap"></div>
@@ -309,6 +340,23 @@
 
 </main>
 
-<script src="/app.js?v=responsive-13"></script>
+<dialog id="directory-picker" aria-labelledby="directory-picker-title">
+  <h2 id="directory-picker-title">Choose a directory</h2>
+  <p class="hint">Folders on the machine running Khoroos. You can also type a new directory in the processing options.</p>
+  <label for="directory-picker-path">Current directory</label>
+  <div class="directory-input">
+    <input id="directory-picker-path" type="text" spellcheck="false">
+    <button id="directory-picker-go" class="btn btn-small" type="button">Go</button>
+  </div>
+  <button id="directory-picker-up" class="btn btn-small" type="button">↑ Parent folder</button>
+  <p id="directory-picker-error" class="notice notice-error" role="alert" hidden></p>
+  <div id="directory-picker-list" class="directory-list" aria-label="Subdirectories"></div>
+  <div class="directory-actions">
+    <button id="directory-picker-cancel" class="btn" type="button">Cancel</button>
+    <button id="directory-picker-select" class="btn btn-primary" type="button">Use this directory</button>
+  </div>
+</dialog>
+
+<script src="/app.js?v=responsive-14"></script>
 </body>
 </html>

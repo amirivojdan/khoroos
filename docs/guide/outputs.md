@@ -11,6 +11,37 @@ A command-line run and `AnalysisRunner.run()` write the same export bundle.
 | `per_bird.csv` | Approximate per-track behaviour shares | Exploratory individual-level analysis |
 | `annotated.mp4` | Optional rendered boxes and labels | Sharing and visual review |
 
+## Optional tracklet exports
+
+Set `AnalysisParams.raw_tracklets_dir` or `AnalysisParams.classified_tracklets_dir` to
+enable clip exports independently. The CLI accepts these through `--set`, for example:
+
+```bash
+khoroos analyze farm.mp4 -o results/ --set raw_tracklets_dir=clips/raw --set classified_tracklets_dir=clips/classified
+```
+
+Each chosen root gets a unique `<video-name>-<run-id>` subfolder. Raw MP4s and JSON sidecars
+are saved directly inside it; classified clips and sidecars go into behavior subfolders.
+Custom labels that contain path separators or other special characters receive a safe,
+disambiguated folder name; their exact labels remain in the JSON. Below-threshold predictions
+go into `uncertain`.
+
+These are accepted action windows, not complete bird trajectories or rejected candidate
+windows. The exported frames are the cropped RGB frames passed to the classifier, before
+its preprocessing, encoded as H.264. Temporal sampling matches inference, and playback rate
+preserves the source window's duration. Odd crop dimensions are padded by one edge pixel for
+MP4 compatibility. Encoding is lossy; these files are not lossless tensor archives.
+
+Each sidecar records the source filename, track ID, source start/end times, frame indices of
+the source window (before sampling), encoded frame count, crop dimensions, and playback rate.
+Classified sidecars additionally include the assigned label, uncertainty flag, confidence,
+representative box, top predictions, and all returned class probabilities.
+
+The actual run directories are recorded in `result.json` under `params.tracklet_exports`.
+Raw clips are saved before their batch is classified, so they remain available if classification
+fails. Completed files from failed or cancelled runs are retained. Normal web job cleanup does
+not remove exports stored outside the managed jobs directory.
+
 ## Result schema
 
 `result.json` includes a `schema_version`. Breaking changes to its serialized structure require

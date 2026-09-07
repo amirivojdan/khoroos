@@ -341,6 +341,83 @@ $('#change-video').addEventListener('click', () => {
 // Starting a job
 // ---------------------------------------------------------------------------
 
+const TRACKLET_KINDS = ['raw', 'classified'];
+let directoryTarget = null;
+let directoryParent = null;
+let directoryRequest = 0;
+
+for (const kind of TRACKLET_KINDS) {
+  $(`#opt-save-${kind}-tracklets`).addEventListener('change', (event) => {
+    $(`#${kind}-tracklets-options`).hidden = !event.target.checked;
+    event.target.setAttribute('aria-expanded', String(event.target.checked));
+  });
+  $(`[data-directory-picker="${kind}"]`).addEventListener('click', () => {
+    directoryTarget = $(`#opt-${kind}-tracklets-dir`);
+    $('#directory-picker-title').textContent = `Choose a ${kind} tracklet directory`;
+    $('#directory-picker').showModal();
+    browseDirectory(directoryTarget.value, state.config?.cache_dir);
+  });
+}
+
+async function browseDirectory(path, fallback = null) {
+  const request = ++directoryRequest;
+  $('#directory-picker-select').disabled = true;
+  $('#directory-picker-up').disabled = true;
+  $('#directory-picker-error').hidden = true;
+  $('#directory-picker-list').textContent = 'Loading folders…';
+  try {
+    let listing;
+    try {
+      listing = await api(`/browse?path=${encodeURIComponent(path)}`);
+    } catch (error) {
+      if (!fallback) throw error;
+      listing = await api(`/browse?path=${encodeURIComponent(fallback)}`);
+    }
+    if (request !== directoryRequest) return;
+    $('#directory-picker-path').value = listing.path;
+    directoryParent = listing.parent;
+    $('#directory-picker-up').disabled = !directoryParent;
+    const list = $('#directory-picker-list');
+    list.replaceChildren();
+    for (const directory of listing.directories) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn directory-entry';
+      button.textContent = directory.name;
+      button.addEventListener('click', () => browseDirectory(directory.path));
+      list.appendChild(button);
+    }
+    if (!listing.directories.length) list.textContent = 'No subdirectories.';
+    $('#directory-picker-select').disabled = false;
+  } catch (error) {
+    if (request !== directoryRequest) return;
+    $('#directory-picker-list').replaceChildren();
+    $('#directory-picker-error').textContent = error.message;
+    $('#directory-picker-error').hidden = false;
+  }
+}
+
+$('#directory-picker-go').addEventListener('click', () => {
+  browseDirectory($('#directory-picker-path').value);
+});
+$('#directory-picker-path').addEventListener('input', () => {
+  ++directoryRequest;
+  $('#directory-picker-select').disabled = true;
+});
+$('#directory-picker-path').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    browseDirectory(event.target.value);
+  }
+});
+$('#directory-picker-up').addEventListener('click', () => browseDirectory(directoryParent));
+$('#directory-picker-cancel').addEventListener('click', () => $('#directory-picker').close());
+$('#directory-picker').addEventListener('close', () => { ++directoryRequest; });
+$('#directory-picker-select').addEventListener('click', () => {
+  directoryTarget.value = $('#directory-picker-path').value;
+  $('#directory-picker').close();
+});
+
 $('#start-btn').addEventListener('click', async () => {
   if (!state.selection) return;
   const actionClasses = selectedBehaviorClasses();
@@ -370,6 +447,13 @@ $('#start-btn').addEventListener('click', async () => {
     if (value) form.append(field, value);
   }
   form.append('render_overlay', $('#opt-overlay').checked ? 'true' : 'false');
+  for (const kind of TRACKLET_KINDS) {
+    if ($(`#opt-save-${kind}-tracklets`).checked) {
+      form.append(`save_${kind}_tracklets`, 'true');
+      const path = $(`#opt-${kind}-tracklets-dir`).value.trim();
+      if (path) form.append(`${kind}_tracklets_dir`, path);
+    }
+  }
 
   try {
     const job = await api('/jobs', { method: 'POST', body: form });
@@ -1525,12 +1609,20 @@ function renderExports() {
   $('#export-links').innerHTML = artifacts.map(([key, label]) =>
     `<a class="btn btn-small" href="/api/jobs/${state.jobId}/export/${key}" download>${label}</a>`,
   ).join('');
+  const saved = $('#tracklet-export-paths');
+  saved.replaceChildren();
+  for (const [kind, path] of Object.entries(state.result?.params?.tracklet_exports || {})) {
+    const row = document.createElement('p');
+    row.textContent = `${prettyLabel(kind)} tracklets saved to: ${path}`;
+    saved.appendChild(row);
+  }
 }
 
 function renderParams(result) {
   const rows = Object.entries(result.params || {})
-    .map(([key, value]) => `<tr><td>${key.replace(/_/g, ' ')}</td>
-      <td class="num">${value === null ? '—' : value}</td></tr>`).join('');
+    .map(([key, value]) => `<tr><td>${escapeHtml(key.replace(/_/g, ' '))}</td>
+      <td class="num">${escapeHtml(value === null ? '—' :
+        typeof value === 'object' ? JSON.stringify(value) : String(value))}</td></tr>`).join('');
   $('#params-dump').innerHTML = `<table><tbody>${rows}</tbody></table>`;
 }
 
@@ -1575,6 +1667,11 @@ async function boot() {
   renderPresets();
 
   renderBehaviorOptions();
+  for (const kind of TRACKLET_KINDS) {
+    const input = $(`#opt-${kind}-tracklets-dir`);
+    input.value = state.config.tracklet_directories?.[kind] || '';
+    input.placeholder = input.value;
+  }
 
   $('#device-badge').hidden = false;
   $('#device-badge').textContent = state.config.device;

@@ -16,6 +16,28 @@ you want, or uncheck those you do not need. Select at least one behavior. If mod
 is not installed yet, analysis includes all behaviors; reload after the first analysis to
 make the choices available.
 
+## Save tracklet clips
+
+In **Advanced settings**, enable **Save raw tracklets**, **Save classified tracklets**, or
+both. Each checkbox reveals its own destination field and **Browse** button. Browse folders
+on the machine running Khoroos, or type a new directory to create when analysis starts.
+
+The defaults are `KHOROOS_CACHE_DIR/tracklets/raw` and
+`KHOROOS_CACHE_DIR/tracklets/classified` (normally under `~/.cache/khoroos`). Each analysis
+creates a unique subfolder so repeated runs do not overwrite clips. These defaults also
+live in the persistent data volume when using the provided Docker Compose configuration.
+In Docker, custom destinations must be paths inside the container; use a bind mount to
+save directly into a host folder.
+
+Raw exports contain the cropped, temporally sampled clips supplied to the classifier.
+Classified exports contain those same clips grouped into predicted behavior folders,
+including `uncertain`, with a JSON file containing predictions and source information beside
+each MP4. Labels are not burned into the video. See [Outputs](outputs.md) for format details.
+
+Both options are off by default. Saving clips adds encoding time and disk usage. Completed
+results display the actual export directories. Saved clips remain after the web job expires
+or is deleted, and partial runs can leave completed clips for review.
+
 ## Review results
 
 The results page pairs the video with a behaviour timeline. Select a point on the timeline to

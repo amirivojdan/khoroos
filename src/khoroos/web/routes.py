@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import os
 import queue
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,22 @@ def _build_params(preset: str, overrides: dict[str, Any]) -> AnalysisParams:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _tracklet_directory(enabled: bool, value: str | None, default: Path) -> str | None:
+    """Check destinations before accepting a potentially large upload."""
+    if not enabled:
+        return None
+    try:
+        path = Path(value.strip() if value and value.strip() else default).expanduser().resolve()
+        ancestor = path
+        while not ancestor.exists():
+            ancestor = ancestor.parent
+        if not ancestor.is_dir() or not os.access(ancestor, os.W_OK | os.X_OK):
+            raise ValueError(f"Directory is not writable: {path}")
+        return str(path)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid tracklet directory: {exc}") from exc
+
+
 @router.post("/jobs")
 async def create_job(
     request: Request,
@@ -131,6 +148,10 @@ async def create_job(
     behaviour_groups: str | None = Form(None),
     invalid_boxes: str | None = Form(None),
     render_overlay: bool = Form(False),
+    save_raw_tracklets: bool = Form(False),
+    raw_tracklets_dir: str | None = Form(None),
+    save_classified_tracklets: bool = Form(False),
+    classified_tracklets_dir: str | None = Form(None),
 ) -> dict[str, Any]:
     """Start an analysis from an upload or a path on the server."""
     manager = _manager(request)
@@ -152,6 +173,14 @@ async def create_job(
             "action_classes": action_classes,
             "behaviour_groups": behaviour_groups,
             "invalid_boxes": invalid_boxes,
+            "raw_tracklets_dir": _tracklet_directory(
+                save_raw_tracklets, raw_tracklets_dir, settings.cache_dir / "tracklets" / "raw"
+            ),
+            "classified_tracklets_dir": _tracklet_directory(
+                save_classified_tracklets,
+                classified_tracklets_dir,
+                settings.cache_dir / "tracklets" / "classified",
+            ),
         },
     )
 
