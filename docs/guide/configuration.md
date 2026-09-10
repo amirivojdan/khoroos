@@ -65,6 +65,8 @@ they always win.
 
 Device syntax is validated before checkpoint resolution: `auto`, `cpu`, `mps`, `cuda`, or
 `cuda:<nonnegative index>`. Hardware availability is checked when the selected backend is used.
+The [web interface](web-interface.md#choose-a-device) also supports choosing an available
+device per job; the process setting supplies the initial selection.
 Assignment is validated too. Use `settings.with_overrides(device="cpu")` to create a validated
 copy; the CLI uses this approach so overrides do not mutate global defaults.
 

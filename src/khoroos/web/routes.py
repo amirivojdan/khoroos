@@ -54,7 +54,12 @@ def get_config(request: Request) -> dict[str, Any]:
 
     runner = _manager(request).runner
     if runner is not None:
-        return runner.analyzer.describe_environment()
+        # Preserve injected metadata while keeping defaults independent of previous jobs.
+        analyzer = runner.analyzer
+        settings = analyzer.settings.with_overrides(device=request.app.state.settings.device)
+        return describe_environment(
+            settings, classifier=analyzer._recognizer, detector=analyzer._detector
+        )
     return describe_environment(request.app.state.settings)
 
 
@@ -139,6 +144,7 @@ async def create_job(
     file: UploadFile | None = File(None),
     server_path: str | None = Form(None),
     preset: str = Form("balanced"),
+    device: str | None = Form(None),
     max_seconds: float | None = Form(None),
     min_confidence: float | None = Form(None),
     detection_confidence: float | None = Form(None),
@@ -159,6 +165,13 @@ async def create_job(
 
     if file is None and not server_path:
         raise HTTPException(status_code=400, detail="Provide either a file upload or server_path.")
+
+    from khoroos.devices import resolve_device
+
+    try:
+        selected_device = resolve_device(device if device is not None else settings.device)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Validated before the upload is consumed: farm recordings run to gigabytes, and
     # writing one to disk only to reject it over a typo'd preset wastes minutes.
@@ -223,6 +236,7 @@ async def create_job(
         original_filename=original_name,
         params=params,
         render_overlay=render_overlay,
+        device=selected_device,
     )
     return job.status_dict()
 

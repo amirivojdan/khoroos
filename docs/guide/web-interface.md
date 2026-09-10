@@ -10,6 +10,30 @@ Open `http://127.0.0.1:8000`, choose a video, select a detail level, and start t
 Progress updates appear while the pipeline detects, tracks, classifies, and summarizes the
 footage.
 
+## Choose a device
+
+Use **Run on** before starting an analysis to select **Automatic**, **CPU**, an available
+GPU (listed by index and model name), or **Apple GPU** when available. Automatic prefers
+CUDA, then Apple GPU, then CPU. CPU inference can be slow.
+
+The list describes hardware visible to the Khoroos server, not the computer displaying
+the browser. In Docker, only GPUs exposed to the container appear, and GPU indices are
+local to that container.
+
+The initial selection follows the server's `--device` or `KHOROOS_DEVICE` setting. For example:
+
+```bash
+khoroos ui --device cuda:1
+```
+
+Each queued job keeps its selected device, and both models run on that device. Jobs still
+run one at a time. Consecutive jobs on the same device reuse loaded models; switching
+devices reloads them and adds startup time. Unavailable selections are rejected, and
+execution errors are reported instead of silently falling back to another device.
+
+Applications embedding a custom runner must configure its device directly; the web worker
+does not relocate or replace injected models when a different device is requested.
+
 Under advanced options, **Behaviors of interest** lists the active classifier's behaviors
 as checkboxes. All are selected by default; clear the selection and click the behaviors
 you want, or uncheck those you do not need. Select at least one behavior. If model metadata

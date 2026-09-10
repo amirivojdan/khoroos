@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Khoroos — Poultry Behavior Statistics</title>
 <link rel="icon" href="/khoroos.png" type="image/png">
-  <link rel="stylesheet" href="/styles.css?v=responsive-35">
+  <link rel="stylesheet" href="/styles.css?v=devices-1">
 </head>
 <body data-screen="select" data-select-view="landing">
 
@@ -18,8 +18,6 @@
   <nav class="site-nav" aria-label="Project links">
     <a href="https://github.com/amirivojdan/khoroos#readme" target="_blank" rel="noopener">Documentation</a>
     <a href="https://github.com/amirivojdan/khoroos" target="_blank" rel="noopener">GitHub</a>
-    <a href="https://github.com/amirivojdan/khoroos/tree/main/notebooks" target="_blank" rel="noopener">Examples</a>
-    <a href="https://github.com/amirivojdan/khoroos/blob/main/notebooks/vjepa2_chicken_action_recognition.ipynb" target="_blank" rel="noopener">Datasets</a>
   </nav>
   <div class="topbar-right">
     <span id="device-badge" class="badge" hidden></span>
@@ -54,9 +52,9 @@
           UT Smart Agriculture Lab</a>.
       </p>
       <ul class="hero-features" aria-label="Khoroos capabilities">
-        <li>Precision Livestock Farming</li>
-        <li>Livestock Video Analytics</li>
-        <li>Behavior Analysis</li>
+        <li>Precision Poultry Farming</li>
+        <li>Poultry Video Analytics</li>
+        <li>Poultry Behavior Analysis</li>
       </ul>
       <div class="hero-actions">
         <button id="getting-started" class="btn btn-primary landing-cta" type="button">
@@ -119,6 +117,14 @@
           <legend>Detail level</legend>
           <div id="preset-options" class="preset-options"></div>
         </fieldset>
+
+        <div class="field-row">
+          <label for="opt-device">Run on</label>
+          <select id="opt-device" aria-describedby="device-hint">
+            <option value="auto">Automatic</option>
+          </select>
+          <span id="device-hint" class="hint">Uses hardware on the machine running Khoroos. CPU inference can be slow.</span>
+        </div>
 
       <details class="advanced">
         <summary>Advanced settings</summary>
@@ -222,6 +228,7 @@
   <div class="card running-card">
     <h1 id="running-title">Analysing</h1>
     <p id="running-file" class="muted"></p>
+    <p id="running-device" class="muted"></p>
 
     <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">
       <div id="progress-fill" class="progress-fill"></div>
@@ -357,6 +364,6 @@
   </div>
 </dialog>
 
-<script src="/app.js?v=responsive-14"></script>
+<script src="/app.js?v=devices-1"></script>
 </body>
 </html>

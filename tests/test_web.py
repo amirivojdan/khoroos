@@ -57,6 +57,38 @@ def test_config_endpoint_describes_the_ui(stub_client):
     assert "maintenance" in payload["behaviour_groups"]
     assert "thresholds" not in payload
     assert set(payload["tracklet_directories"]) == {"raw", "classified"}
+    assert {"id": "cpu", "label": "CPU"} in payload["devices"]
+    assert payload["default_device"] == "cpu"
+
+
+def test_device_selection_is_retained_and_used(stub_client, synthetic_video):
+    response = stub_client.post("/api/jobs", data={
+        "server_path": str(synthetic_video), "device": "cpu",
+    })
+    assert response.status_code == 200
+    assert response.json()["device"] == "cpu"
+    status = wait_for(stub_client, response.json()["job_id"], {"completed", "failed"})
+    assert status["state"] == "completed", status.get("error")
+    assert status["device"] == "cpu"
+
+
+@pytest.mark.parametrize("device", ["banana", "cuda:999999", "cuda:-1"])
+def test_invalid_device_rejected_before_upload(client, device):
+    response = client.post("/api/jobs", data={"device": device}, files={
+        "file": ("farm.mp4", b"not consumed", "video/mp4"),
+    })
+    assert response.status_code == 400
+    assert "unavailable" in response.json()["detail"]
+    assert client.app.state.jobs.list_jobs() == []
+    assert not (client.app.state.settings.jobs_dir / "uploads").exists()
+
+
+def test_previous_runner_device_does_not_change_web_default(stub_client):
+    analyzer = stub_client.app.state.jobs.runner.analyzer
+    analyzer.settings = analyzer.settings.with_overrides(device="cuda:1")
+    payload = stub_client.get("/api/config").json()
+    assert payload["default_device"] == "cpu"
+    assert payload["device"] == "cpu"
 
 
 def test_static_index_is_served(client):
@@ -65,8 +97,8 @@ def test_static_index_is_served(client):
     assert "Khoroos" in response.text
     assert 'class="player-stage"' in response.text
     assert 'id="player-overlay"' in response.text
-    assert "styles.css?v=responsive-35" in response.text
-    assert "app.js?v=responsive-14" in response.text
+    assert "styles.css?v=devices-1" in response.text
+    assert "app.js?v=devices-1" in response.text
 
 
 def test_select_screen_uses_a_single_video_dropzone(client):
@@ -95,8 +127,8 @@ def test_select_screen_opens_with_project_intro_before_setup(client):
     assert "descriptive behavior statistics. Developed at the" in " ".join(page.split())
     assert 'class="site-nav"' in page
     assert 'class="hero-features"' in page
-    assert "Precision Livestock Farming" in page
-    assert "Livestock Video Analytics" in page
+    assert "Precision Poultry Farming" in page
+    assert "Poultry Video Analytics" in page
     assert "Behavior Statistics" in page
     assert "https://www.ut-smartagriculture.com/" in page
     assert "Khoroos turns poultry-house footage into" in page

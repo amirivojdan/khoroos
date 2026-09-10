@@ -7,6 +7,7 @@ CLI runs, and a missing checkpoint is reported the same way on both.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any
 
 from khoroos.config import (
@@ -30,6 +31,7 @@ def describe_environment(
     # Imported here so `khoroos.environment` stays importable from `khoroos/__init__`
     # without a cycle, and so importing this module does not drag in the model registry.
     from khoroos import __version__
+    from khoroos.devices import available_devices, resolve_device
     from khoroos.interfaces import component_name
     from khoroos.models.metadata import checkpoint_classes
     from khoroos.models.registry import checkpoint_status
@@ -60,9 +62,17 @@ def describe_environment(
                 "source": "injected",
             }
 
+    default_device = settings.device
+    if default_device == "cuda":
+        # Keep an unavailable configured default visible rather than replacing it.
+        with suppress(ValueError):
+            default_device = resolve_device(default_device)
+
     return {
         "version": __version__,
         "device": settings.resolved_device(),
+        "default_device": default_device,
+        "devices": available_devices(),
         "presets": {name: dict(values) for name, values in PRESETS.items()},
         "default_preset": DEFAULT_PRESET,
         "classes": classes,

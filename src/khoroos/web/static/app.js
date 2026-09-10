@@ -435,6 +435,7 @@ $('#start-btn').addEventListener('click', async () => {
 
   const form = new FormData();
   form.append('preset', state.preset);
+  form.append('device', $('#opt-device').value);
   form.append('file', state.selection.file);
   const maxSeconds = $('#opt-max-seconds').value;
   if (maxSeconds) form.append('max_seconds', maxSeconds);
@@ -494,6 +495,8 @@ $('#cancel-btn').addEventListener('click', async () => {
 
 function startWatching(job) {
   showScreen('running');
+  $('#device-badge').textContent = job.device || state.config.device;
+  $('#running-device').textContent = `Run on: ${job.device || state.config.device}`;
   $('#running-file').textContent = job.filename;
   $('#running-title').textContent = 'Analysing';
   renderStages('probe');
@@ -1665,6 +1668,19 @@ async function boot() {
 
   state.preset = state.config.default_preset || 'balanced';
   renderPresets();
+
+  const deviceSelect = $('#opt-device');
+  deviceSelect.replaceChildren(new Option('Automatic', 'auto'));
+  for (const device of state.config.devices || []) {
+    deviceSelect.add(new Option(device.label, device.id));
+  }
+  const defaultDevice = state.config.default_device || 'auto';
+  if (![...deviceSelect.options].some(option => option.value === defaultDevice)) {
+    const unavailable = new Option(`${defaultDevice} (unavailable)`, defaultDevice);
+    unavailable.disabled = true;
+    deviceSelect.add(unavailable);
+  }
+  deviceSelect.value = defaultDevice;
 
   renderBehaviorOptions();
   for (const kind of TRACKLET_KINDS) {

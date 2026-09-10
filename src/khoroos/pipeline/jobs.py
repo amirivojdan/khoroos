@@ -9,6 +9,7 @@ published to subscribers over queues that the SSE endpoint drains.
 from __future__ import annotations
 
 import contextlib
+import gc
 import logging
 import queue
 import shutil
@@ -51,6 +52,7 @@ class Job:
     params: AnalysisParams
 
     render_overlay: bool = False
+    device: str = "cpu"
 
     state: JobState = JobState.QUEUED
     progress: float = 0.0
@@ -70,6 +72,7 @@ class Job:
     def status_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
+            "device": self.device,
             "state": self.state.value,
             "progress": round(self.progress, 4),
             "stage": self.stage,
@@ -95,6 +98,8 @@ class JobManager:
         #: Built on first use so the UI starts before 1.7 GB of weights load. Injectable so
         #: callers — tests, embedders — can supply an already-loaded or stubbed runner.
         self.runner = runner
+        self._managed_runner: AnalysisRunner | None = None
+        self._runner_device: str | None = None
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._queue: queue.Queue[str | None] = queue.Queue()
@@ -112,15 +117,20 @@ class JobManager:
         original_filename: str,
         params: AnalysisParams,
         render_overlay: bool = False,
+        device: str | None = None,
     ) -> Job:
         if self._closed.is_set():
             raise RuntimeError("Job manager is closed.")
+        from khoroos.devices import resolve_device
+
+        selected_device = resolve_device(device if device is not None else self.settings.device)
         job = Job(
             job_id=uuid.uuid4().hex[:12],
             video_path=video_path,
             original_filename=original_filename,
             params=params,
             render_overlay=render_overlay,
+            device=selected_device,
         )
         with self._lock:
             self._jobs[job.job_id] = job
@@ -229,7 +239,6 @@ class JobManager:
 
     def _process(self, job: Job) -> None:
         from khoroos.pipeline.analyze import CancelledError
-        from khoroos.pipeline.runner import AnalysisRunner
 
         with self._lock:
             if job.state.is_terminal or job.job_id not in self._jobs:
@@ -240,9 +249,6 @@ class JobManager:
             job.message = "Loading models"
         self._publish(job)
 
-        if self.runner is None:
-            self.runner = AnalysisRunner(settings=self.settings)
-
         def on_progress(event: ProgressEvent) -> None:
             job.stage = event.stage
             job.progress = event.progress
@@ -251,6 +257,8 @@ class JobManager:
             self._publish(job)
 
         try:
+            self._prepare_runner(job.device)
+            assert self.runner is not None
             artifacts = self.runner.run(
                 job.video_path,
                 output_dir=self.job_dir(job.job_id),
@@ -278,6 +286,36 @@ class JobManager:
             logger.exception("Job %s failed", job.job_id)
             job.error = str(exc)
             self._finish(job, JobState.FAILED, f"Failed: {exc}")
+
+    def _prepare_runner(self, device: str) -> None:
+        """Reuse models on one device; release them before loading on another."""
+        from khoroos.devices import resolve_device
+        from khoroos.pipeline.runner import AnalysisRunner
+
+        # Recheck at execution time in case hardware changed while the job was queued.
+        device = resolve_device(device)
+        if self.runner is not None:
+            current = self._runner_device or resolve_device(self.runner.settings.device)
+            if current == device:
+                return
+            if self.runner is not self._managed_runner:
+                raise ValueError("An injected runner cannot switch devices; configure it directly.")
+            self.runner = None
+            self._managed_runner = None
+            self._runner_device = None
+            gc.collect()
+            if current.startswith("cuda:"):
+                import torch
+
+                with torch.cuda.device(current):
+                    torch.cuda.empty_cache()
+            elif current == "mps":
+                import torch
+
+                torch.mps.empty_cache()
+        self.runner = AnalysisRunner(settings=self.settings.with_overrides(device=device))
+        self._managed_runner = self.runner
+        self._runner_device = device
 
     def _finish(self, job: Job, state: JobState, message: str) -> None:
         job.state = state
