@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,6 +13,7 @@ if TYPE_CHECKING:
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from khoroos import __version__
 from khoroos.config import Settings, get_settings
@@ -24,9 +27,22 @@ STATIC_DIR = Path(__file__).parent / "static"
 def create_app(
     settings: Settings | None = None, *, runner: AnalysisRunner | None = None
 ) -> FastAPI:
-    """Build the application. The job manager is attached to app state."""
+    """Build an app whose lifespan owns its worker; injected runners remain caller-owned.
+
+    Constructing the app does not start a thread or create job storage. ASGI startup
+    initializes ``app.state.jobs`` and shutdown asks its worker to finish and release models.
+    """
     settings = settings or (runner.settings if runner is not None else get_settings())
-    jobs = JobManager(settings, runner=runner)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        jobs = JobManager(settings, runner=runner)
+        app.state.jobs = jobs
+        try:
+            yield
+        finally:
+            # Joining the analysis thread must not block the application's event loop.
+            await run_in_threadpool(jobs.close)
 
     app = FastAPI(
         title="Khoroos",
@@ -34,10 +50,10 @@ def create_app(
         version=__version__,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
+        lifespan=lifespan,
     )
 
     app.state.settings = settings
-    app.state.jobs = jobs
 
     from khoroos.web.routes import router
 

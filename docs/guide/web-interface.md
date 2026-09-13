@@ -13,8 +13,9 @@ footage.
 ## Choose a device
 
 Use **Run on** before starting an analysis to select **Automatic**, **CPU**, an available
-GPU (listed by index and model name), or **Apple GPU** when available. Automatic prefers
-CUDA, then Apple GPU, then CPU. CPU inference can be slow.
+GPU (listed by index and model name), **Apple GPU** when available, or **All N GPUs** when
+the server has more than one. Automatic prefers CUDA, then Apple GPU, then CPU — always a
+single device. CPU inference can be slow.
 
 The list describes hardware visible to the Khoroos server, not the computer displaying
 the browser. In Docker, only GPUs exposed to the container appear, and GPU indices are
@@ -31,8 +32,35 @@ run one at a time. Consecutive jobs on the same device reuse loaded models; swit
 devices reloads them and adds startup time. Unavailable selections are rejected, and
 execution errors are reported instead of silently falling back to another device.
 
+**All N GPUs** splits one analysis across every GPU rather than running several jobs at
+once: each batch is divided between the GPUs and reassembled in order, so the analysis is
+the same and the run is faster. A job created this way reports the devices it resolved to,
+such as `cuda:0,cuda:1`. Because the batch is divided rather than duplicated, the batch
+sizes under advanced settings remain totals across all the GPUs — see
+[using several GPUs](configuration.md#using-several-gpus).
+
 Applications embedding a custom runner must configure its device directly; the web worker
 does not relocate or replace injected models when a different device is requested.
+
+## Restrict the analysis to part of the frame
+
+**Region of interest** shows a frame from the chosen video; drag a rectangle over it to
+analyse only that area, and **Clear region** to go back to the whole frame. A bird counts
+when the centre of its box falls inside. The rectangle is kept as fractions of the frame,
+so it means the same thing on a recording of any resolution, and it appears in the copyable
+command as `--roi x1,y1,x2,y2`.
+
+The results player shows the saved region as a dashed cyan outline. It stays visible
+when **Show tracks** is off and when viewing the annotated video, and follows the picture
+as the player is resized.
+
+The frame is decoded in the browser from the file you selected, so no upload happens before
+you start the analysis. Browsers read fewer video containers than Khoroos does; when one
+cannot be previewed, the region picker says so and the analysis is otherwise unaffected —
+use `--roi` on the command line for that file.
+
+See [region of interest](configuration.md#region-of-interest) for what the setting does to
+the pipeline.
 
 Under advanced options, **Behaviors of interest** lists the active classifier's behaviors
 as checkboxes. All are selected by default; clear the selection and click the behaviors

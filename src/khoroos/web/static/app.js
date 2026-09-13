@@ -15,6 +15,7 @@
 const state = {
   config: null,
   selection: null,        // { kind: 'upload', file, name, sizeMb }
+  roi: null,              // { x1, y1, x2, y2 } as 0-1 fractions, or null for the whole frame
   preset: 'balanced',
   jobId: null,
   result: null,
@@ -298,6 +299,8 @@ $('#setup-back').addEventListener('click', showSelectLanding);
 
 function setSelection(selection) {
   state.selection = selection;
+  loadRoiPreview(selection?.file || null);
+  renderCliCommand();
   $('#selection').hidden = false;
   $('#selection-name').textContent = selection.name;
   $('#selection-size').textContent = selection.sizeMb ? `${selection.sizeMb} MB` : '';
@@ -333,6 +336,7 @@ dropzone.addEventListener('drop', (event) => {
 
 $('#change-video').addEventListener('click', () => {
   $('#file-input').value = '';
+  loadRoiPreview(null);
   $('#start-error').hidden = true;
   showSelectStage('file');
 });
@@ -416,6 +420,7 @@ $('#directory-picker').addEventListener('close', () => { ++directoryRequest; });
 $('#directory-picker-select').addEventListener('click', () => {
   directoryTarget.value = $('#directory-picker-path').value;
   $('#directory-picker').close();
+  renderCliCommand();
 });
 
 $('#start-btn').addEventListener('click', async () => {
@@ -439,6 +444,8 @@ $('#start-btn').addEventListener('click', async () => {
   form.append('file', state.selection.file);
   const maxSeconds = $('#opt-max-seconds').value;
   if (maxSeconds) form.append('max_seconds', maxSeconds);
+  const region = roiParam();
+  if (region) form.append('roi', region);
   if (actionClasses.length) form.append('action_classes', actionClasses.join(','));
   form.append('min_confidence', $('#opt-min-conf').value);
   form.append('detection_confidence', $('#opt-det-conf').value);
@@ -469,6 +476,253 @@ $('#start-btn').addEventListener('click', async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Region of interest
+// ---------------------------------------------------------------------------
+//
+// Stored as 0-1 fractions of the frame, which is what the pipeline and `--roi` both take,
+// so the same region survives a change of recording resolution. The preview frame is
+// decoded from the file the browser already holds — no upload, no server round-trip.
+
+//: Drags shorter than this in either axis are treated as a click, which clears the region
+//: rather than creating a sliver nothing can fall inside.
+const ROI_MIN_SIDE = 0.02;
+
+let roiPreviewUrl = null;
+let roiDragOrigin = null;
+
+const clamp01 = (value) => Math.min(1, Math.max(0, value));
+
+/** The region as the `roi` parameter spells it, or null for the whole frame. */
+function roiParam() {
+  const roi = state.roi;
+  if (!roi) return null;
+  return [roi.x1, roi.y1, roi.x2, roi.y2].map((v) => Number(v.toFixed(4))).join(',');
+}
+
+function renderRoi() {
+  const box = $('#roi-box');
+  const roi = state.roi;
+  box.hidden = !roi;
+  if (roi) {
+    box.style.left = `${roi.x1 * 100}%`;
+    box.style.top = `${roi.y1 * 100}%`;
+    box.style.width = `${(roi.x2 - roi.x1) * 100}%`;
+    box.style.height = `${(roi.y2 - roi.y1) * 100}%`;
+  }
+  const share = roi ? (roi.x2 - roi.x1) * (roi.y2 - roi.y1) : 1;
+  $('#roi-value').textContent = roi
+    ? `x ${roi.x1.toFixed(2)}–${roi.x2.toFixed(2)}  y ${roi.y1.toFixed(2)}–${roi.y2.toFixed(2)}`
+      + `  (${Math.round(share * 100)}% of the frame)`
+    : 'Whole frame';
+  $('#roi-clear').disabled = !roi;
+  renderCliCommand();
+}
+
+function setRoi(roi) {
+  state.roi = roi;
+  renderRoi();
+}
+
+function roiPointAt(event) {
+  const rect = $('#roi-stage').getBoundingClientRect();
+  return {
+    x: clamp01((event.clientX - rect.left) / rect.width),
+    y: clamp01((event.clientY - rect.top) / rect.height),
+  };
+}
+
+const roiBetween = (a, b) => ({
+  x1: Math.min(a.x, b.x), y1: Math.min(a.y, b.y),
+  x2: Math.max(a.x, b.x), y2: Math.max(a.y, b.y),
+});
+
+/**
+ * Draw a frame from the chosen file into the preview canvas.
+ *
+ * Browsers decode fewer containers than PyAV does, so a file Khoroos can analyse may still
+ * be unpreviewable here. That is reported as the loss of a convenience, not an error: the
+ * analysis is unaffected and `--roi` still works.
+ */
+function loadRoiPreview(file) {
+  if (roiPreviewUrl) URL.revokeObjectURL(roiPreviewUrl);
+  roiPreviewUrl = null;
+  setRoi(null);
+
+  const stage = $('#roi-stage');
+  const status = $('#roi-status');
+  stage.hidden = true;
+  status.hidden = false;
+
+  if (!file) {
+    status.textContent = 'Choose a video to draw a region.';
+    return;
+  }
+  status.textContent = 'Reading a frame from the video…';
+
+  roiPreviewUrl = URL.createObjectURL(file);
+  const video = document.createElement('video');
+  video.muted = true;
+  video.preload = 'auto';
+  video.src = roiPreviewUrl;
+
+  video.addEventListener('error', () => {
+    status.textContent = 'This video cannot be previewed in the browser, so a region cannot '
+      + 'be drawn here. The analysis itself is unaffected; use --roi on the command line.';
+  });
+  video.addEventListener('loadeddata', () => {
+    // A moment in rather than frame zero: opening frames are often a fade or a blank.
+    video.currentTime = Math.min(1, (video.duration || 2) / 2);
+  });
+  video.addEventListener('seeked', () => {
+    const canvas = $('#roi-canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    stage.hidden = false;
+    status.hidden = true;
+    renderRoi();
+  }, { once: true });
+}
+
+const roiStage = $('#roi-stage');
+roiStage.addEventListener('pointerdown', (event) => {
+  roiDragOrigin = roiPointAt(event);
+  roiStage.setPointerCapture(event.pointerId);
+  event.preventDefault();
+});
+roiStage.addEventListener('pointermove', (event) => {
+  if (roiDragOrigin) setRoi(roiBetween(roiDragOrigin, roiPointAt(event)));
+});
+for (const type of ['pointerup', 'pointercancel']) {
+  roiStage.addEventListener(type, (event) => {
+    if (!roiDragOrigin) return;
+    const roi = roiBetween(roiDragOrigin, roiPointAt(event));
+    roiDragOrigin = null;
+    const tooSmall = roi.x2 - roi.x1 < ROI_MIN_SIDE || roi.y2 - roi.y1 < ROI_MIN_SIDE;
+    setRoi(tooSmall ? null : roi);
+  });
+}
+$('#roi-clear').addEventListener('click', () => setRoi(null));
+
+// ---------------------------------------------------------------------------
+// Command-line echo
+// ---------------------------------------------------------------------------
+//
+// The same analysis, spelled as `khoroos analyze`. Everything below mirrors what the start
+// button posts to /api/jobs, so the printed command and the button do the same run. A
+// setting left alone is left out: the preset supplies it identically on both surfaces.
+
+//: Form fields with a dedicated flag. Every one is spelled the same on the command line
+//: with dashes for underscores, which `tests/test_web.py` checks against `--help`.
+const CLI_FLAGS = [
+  'preset', 'device', 'max_seconds', 'min_confidence', 'detection_confidence',
+  'detection_batch_size', 'action_batch_size', 'roi',
+];
+
+//: Analysis parameters with no flag of their own, passed through `--set`.
+const CLI_SET_PARAMS = ['action_classes', 'raw_tracklets_dir', 'classified_tracklets_dir'];
+
+const cliFlag = (field) => `--${field.replace(/_/g, '-')}`;
+
+/** Quote a value for a POSIX shell, leaving ordinary words untouched. */
+function shellQuote(value) {
+  const text = String(value);
+  return /^[A-Za-z0-9_@%+=:,.\/-]+$/.test(text) ? text : `'${text.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Build the `khoroos analyze` command for the options currently on screen.
+ *
+ * Kept on one line rather than split with backslashes: a single line pastes correctly into
+ * every shell, including the Windows ones where a trailing backslash means nothing.
+ */
+function buildCliCommand() {
+  const parts = ['khoroos', 'analyze', shellQuote(state.selection?.name || 'video.mp4')];
+  const flag = (field, value) => parts.push(cliFlag(field), shellQuote(value));
+  const setParam = (field, value) => parts.push('-s', shellQuote(`${field}=${value}`));
+
+  // Always stated, never inherited: the reader's KHOROOS_DEVICE need not match this server's.
+  flag('preset', state.preset);
+  flag('device', $('#opt-device').value || 'auto');
+
+  const maxSeconds = $('#opt-max-seconds').value.trim();
+  if (maxSeconds) flag('max_seconds', maxSeconds);
+
+  const region = roiParam();
+  if (region) flag('roi', region);
+
+  flag('min_confidence', $('#opt-min-conf').value);
+  flag('detection_confidence', $('#opt-det-conf').value);
+
+  // Empty means "whatever the preset says", which is equally true of an absent flag.
+  for (const [selector, field] of Object.entries(BATCH_INPUTS)) {
+    const value = $(selector).value.trim();
+    if (value) flag(field, value);
+  }
+
+  // Every behavior selected is what an unset action_classes already means.
+  const classes = selectedBehaviorClasses();
+  const available = state.config?.classes || [];
+  if (classes.length && available.length && classes.length < available.length) {
+    setParam('action_classes', classes.join(','));
+  }
+
+  for (const kind of TRACKLET_KINDS) {
+    if (!$(`#opt-save-${kind}-tracklets`).checked) continue;
+    const typed = $(`#opt-${kind}-tracklets-dir`).value.trim();
+    const fallback = (state.config?.tracklet_directories || {})[kind] || '';
+    const directory = typed || fallback;
+    if (directory) setParam(`${kind}_tracklets_dir`, directory);
+  }
+
+  if ($('#opt-overlay').checked) parts.push('--overlay');
+
+  return parts.join(' ');
+}
+
+function renderCliCommand() {
+  const element = $('#cli-command');
+  if (element) element.textContent = buildCliCommand();
+}
+
+// Every control lives inside the options stage, so one delegated pair of listeners keeps
+// the command current without each field having to remember to announce itself.
+for (const type of ['input', 'change']) {
+  $('#select-stage-options').addEventListener(type, renderCliCommand);
+}
+
+/** Copy text, falling back for plain-http origins where the Clipboard API is absent. */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* denied or unavailable; try the selection-based path below */ }
+
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(area);
+  area.select();
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch { copied = false; }
+  area.remove();
+  return copied;
+}
+
+let cliCopyTimer = null;
+$('#copy-cli').addEventListener('click', async () => {
+  const status = $('#cli-copy-status');
+  const copied = await copyText(buildCliCommand());
+  status.textContent = copied ? 'Copied.' : 'Could not copy — select the command and press Ctrl+C.';
+  status.style.color = copied ? '' : 'var(--status-warning)';
+  clearTimeout(cliCopyTimer);
+  cliCopyTimer = setTimeout(() => { status.textContent = ''; }, 4000);
+});
+
 $('#new-analysis').addEventListener('click', () => {
   if (state.eventSource) state.eventSource.close();
   stopOverlayLoop();
@@ -476,6 +730,7 @@ $('#new-analysis').addEventListener('click', () => {
   state.jobId = null; state.result = null; state.focusTrack = null; state.overlay = null;
   state.selection = null;
   $('#file-input').value = '';
+  loadRoiPreview(null);
   $('#selection').hidden = true;
   $('#start-btn').disabled = true;
   showSelectStage('file');
@@ -642,6 +897,7 @@ function renderKpis(result, metrics) {
 
 function setupPlayer(result) {
   const player = $('#player');
+  $('#player-roi-hint').hidden = !result.params?.roi;
   // renderResults() re-runs on a theme change; reloading the source then would restart
   // playback and lose the annotated choice, so the video is only (re)pointed at a job
   // when the job itself changes.
@@ -956,6 +1212,30 @@ function drawActionBox(ctx, box, trackId, prediction, fit, focused, opacity) {
   ctx.fillText(text, labelX + 5, labelY);
 }
 
+/** Draw the saved analysis region in the displayed picture, excluding letterboxing. */
+function drawPlayerRoi(ctx, roi, fit) {
+  if (!roi) return;
+  const pictureWidth = fit.width - 2 * fit.offsetX;
+  const pictureHeight = fit.height - 2 * fit.offsetY;
+  const [x1, y1, x2, y2] = roi;
+  const x = fit.offsetX + x1 * pictureWidth;
+  const y = fit.offsetY + y1 * pictureHeight;
+  const width = (x2 - x1) * pictureWidth;
+  const height = (y2 - y1) * pictureHeight;
+
+  ctx.save();
+  ctx.globalAlpha = 1;
+  // A dark under-stroke keeps the region visible over pale birds and bright litter.
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(x, y, width, height);
+  ctx.strokeStyle = '#67e8f9';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([8, 5]);
+  ctx.strokeRect(x, y, width, height);
+  ctx.restore();
+}
+
 function drawPlayerOverlay() {
   const canvas = $('#player-overlay');
   const player = $('#player');
@@ -977,6 +1257,7 @@ function drawPlayerOverlay() {
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, fit.width, fit.height);
 
+  drawPlayerRoi(ctx, state.result.params?.roi, fit);
   if (!$('#tracks-switch').checked) return;
 
   const t = player.currentTime;
@@ -1691,6 +1972,8 @@ async function boot() {
 
   $('#device-badge').hidden = false;
   $('#device-badge').textContent = state.config.device;
+
+  renderCliCommand();
 
   const missing = Object.entries(state.config.models)
     .filter(([, info]) => !info.available)

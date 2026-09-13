@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Khoroos — Poultry Behavior Statistics</title>
 <link rel="icon" href="/khoroos.png" type="image/png">
-  <link rel="stylesheet" href="/styles.css?v=devices-1">
+  <link rel="stylesheet" href="/styles.css?v=roi-1">
 </head>
 <body data-screen="select" data-select-view="landing">
 
@@ -123,8 +123,24 @@
           <select id="opt-device" aria-describedby="device-hint">
             <option value="auto">Automatic</option>
           </select>
-          <span id="device-hint" class="hint">Uses hardware on the machine running Khoroos. CPU inference can be slow.</span>
+          <span id="device-hint" class="hint">Uses hardware on the machine running Khoroos. CPU inference can be slow. Choosing all GPUs splits every batch across them, so the batch sizes under Advanced settings stay totals.</span>
         </div>
+
+        <fieldset class="field roi-field">
+          <legend>Region of interest</legend>
+          <p class="hint">Drag a rectangle on the frame to analyse only part of it. A bird is
+            counted when the centre of its box falls inside. Leave it clear to use the whole
+            frame.</p>
+          <div id="roi-stage" class="roi-stage" hidden>
+            <canvas id="roi-canvas" class="roi-canvas"></canvas>
+            <div id="roi-box" class="roi-box" hidden></div>
+          </div>
+          <p id="roi-status" class="hint">Choose a video to draw a region.</p>
+          <div class="roi-readout">
+            <span id="roi-value" class="roi-value" role="status">Whole frame</span>
+            <button id="roi-clear" class="btn btn-small" type="button" disabled>Clear region</button>
+          </div>
+        </fieldset>
 
       <details class="advanced">
         <summary>Advanced settings</summary>
@@ -208,6 +224,16 @@
 
       </details>
 
+        <div class="cli-echo">
+          <div class="cli-echo-head">
+            <span class="cli-echo-title">The same run from the command line</span>
+            <button id="copy-cli" class="btn btn-small" type="button">Copy</button>
+          </div>
+          <code id="cli-command" class="cli-echo-code"></code>
+          <p class="hint">Run it from the folder holding the video, or replace the file name
+            with its full path. <span id="cli-copy-status" class="cli-copy-status" role="status"></span></p>
+        </div>
+
         <button id="start-btn" class="btn btn-primary btn-block" type="button" disabled>
           Start analysis
         </button>
@@ -274,6 +300,7 @@
       <canvas id="player-overlay" class="player-overlay" aria-hidden="true"></canvas>
     </div>
     <p class="hint player-hint">
+      <span id="player-roi-hint" hidden>The dashed cyan outline marks the selected region of interest.</span>
       Fading dots show each bird's recent path. A coloured box appears only while an action
       was confidently recognised; its label and confidence describe that result. Windows the
       model was unsure about are left unmarked here and counted as uncertain time in the
@@ -364,6 +391,6 @@
   </div>
 </dialog>
 
-<script src="/app.js?v=devices-1"></script>
+<script src="/app.js?v=roi-2"></script>
 </body>
 </html>

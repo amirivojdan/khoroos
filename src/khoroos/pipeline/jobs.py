@@ -4,6 +4,10 @@ Analysis is a multi-minute, GPU-bound operation, so it cannot run inside a reque
 handler. Jobs run on a single background worker thread — one at a time, because the two
 models together occupy enough memory that concurrent runs would thrash — and progress is
 published to subscribers over queues that the SSE endpoint drains.
+
+One job at a time does not mean one GPU at a time: a job whose device is a multi-device
+spec splits each batch across those devices inside the single run. See
+:mod:`khoroos.models.parallel`.
 """
 
 from __future__ import annotations
@@ -99,7 +103,7 @@ class JobManager:
         #: callers — tests, embedders — can supply an already-loaded or stubbed runner.
         self.runner = runner
         self._managed_runner: AnalysisRunner | None = None
-        self._runner_device: str | None = None
+        self._runner_devices: list[str] | None = None
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._queue: queue.Queue[str | None] = queue.Queue()
@@ -121,9 +125,10 @@ class JobManager:
     ) -> Job:
         if self._closed.is_set():
             raise RuntimeError("Job manager is closed.")
-        from khoroos.devices import resolve_device
+        from khoroos.devices import resolve_devices
 
-        selected_device = resolve_device(device if device is not None else self.settings.device)
+        requested = device if device is not None else self.settings.device
+        selected_device = ",".join(resolve_devices(requested))
         job = Job(
             job_id=uuid.uuid4().hex[:12],
             video_path=video_path,
@@ -133,9 +138,13 @@ class JobManager:
             device=selected_device,
         )
         with self._lock:
+            # Resolution may take time. Check again under the shutdown lock so a job
+            # cannot be registered after close() has taken its cancellation snapshot.
+            if self._closed.is_set():
+                raise RuntimeError("Job manager is closed.")
             self._jobs[job.job_id] = job
             self._subscribers[job.job_id] = []
-        self._queue.put(job.job_id)
+            self._queue.put(job.job_id)
         logger.info("Queued job %s for %s", job.job_id, original_filename)
         return job
 
@@ -218,6 +227,18 @@ class JobManager:
     # -- worker -------------------------------------------------------------
 
     def _run_worker(self) -> None:
+        """Keep managed model cleanup on the thread that uses the models.
+
+        close() may time out while inference is finishing. Its caller must never release
+        weights that this thread is still using. Borrowed runners are left untouched.
+        """
+        try:
+            self._work_until_stopped()
+        finally:
+            if self._managed_runner is not None:
+                self._release(self._runner_devices or [])
+
+    def _work_until_stopped(self) -> None:
         while True:
             try:
                 self.cleanup_expired()
@@ -288,34 +309,48 @@ class JobManager:
             self._finish(job, JobState.FAILED, f"Failed: {exc}")
 
     def _prepare_runner(self, device: str) -> None:
-        """Reuse models on one device; release them before loading on another."""
-        from khoroos.devices import resolve_device
+        """Reuse models on one set of devices; release them before loading on another."""
+        from khoroos.devices import resolve_devices
         from khoroos.pipeline.runner import AnalysisRunner
 
-        # Recheck at execution time in case hardware changed while the job was queued.
-        device = resolve_device(device)
+        # Rechecked at execution time in case hardware changed while the job was queued.
+        devices = resolve_devices(device)
         if self.runner is not None:
-            current = self._runner_device or resolve_device(self.runner.settings.device)
-            if current == device:
+            current = self._runner_devices or resolve_devices(self.runner.settings.device)
+            if current == devices:
                 return
             if self.runner is not self._managed_runner:
                 raise ValueError("An injected runner cannot switch devices; configure it directly.")
-            self.runner = None
-            self._managed_runner = None
-            self._runner_device = None
-            gc.collect()
-            if current.startswith("cuda:"):
+            self._release(current)
+        self.runner = AnalysisRunner(
+            settings=self.settings.with_overrides(device=",".join(devices))
+        )
+        self._managed_runner = self.runner
+        self._runner_devices = devices
+
+    def _release(self, devices: list[str]) -> None:
+        """Drop the managed runner and hand each device its cached memory back."""
+        runner = self._managed_runner
+        self.runner = None
+        self._managed_runner = None
+        self._runner_devices = None
+        # Weights first, then the device worker threads a multi-device model holds; only
+        # then is the memory actually free to give back.
+        close = getattr(runner, "close", None)
+        if close is not None:
+            close()
+        del runner
+        gc.collect()
+        for device in devices:
+            if device.startswith("cuda:"):
                 import torch
 
-                with torch.cuda.device(current):
+                with torch.cuda.device(device):
                     torch.cuda.empty_cache()
-            elif current == "mps":
+            elif device == "mps":
                 import torch
 
                 torch.mps.empty_cache()
-        self.runner = AnalysisRunner(settings=self.settings.with_overrides(device=device))
-        self._managed_runner = self.runner
-        self._runner_device = device
 
     def _finish(self, job: Job, state: JobState, message: str) -> None:
         job.state = state
@@ -338,12 +373,20 @@ class JobManager:
         return removed
 
     def close(self, timeout: float = 5.0) -> None:
-        """Cancel unfinished work and ask the background worker to stop."""
-        if self._closed.is_set():
-            return
-        self._closed.set()
-        for job in self.list_jobs():
-            if not job.state.is_terminal:
-                self.cancel(job.job_id)
-        self._queue.put(None)
-        self._worker.join(timeout=timeout)
+        """Cancel unfinished work and wait up to ``timeout`` for worker cleanup.
+
+        Cancellation is cooperative: a running model call may outlast the timeout. The
+        worker releases its managed runner when it exits. Repeated calls can wait again;
+        an injected runner is never closed by the manager.
+        """
+        with self._lock:
+            first_close = not self._closed.is_set()
+            self._closed.set()
+            job_ids = list(self._jobs) if first_close else []
+        if first_close:
+            for job_id in job_ids:
+                self.cancel(job_id)
+            self._queue.put(None)
+        # A progress callback may request shutdown from the worker itself.
+        if threading.current_thread() is not self._worker:
+            self._worker.join(timeout=timeout)

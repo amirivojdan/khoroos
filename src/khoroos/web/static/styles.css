@@ -1152,3 +1152,60 @@ body[data-screen="results"] .footnote {
 @media (prefers-reduced-motion: reduce) {
   body[data-screen="select"] .select-stage:not([hidden]) { animation: none; }
 }
+
+/* Command-line echo -------------------------------------------------------- */
+
+.cli-echo {
+  margin: 18px 0 14px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.cli-echo-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 8px;
+}
+.cli-echo-title { font-size: .82rem; font-weight: 600; color: var(--text-secondary); }
+.cli-echo-code {
+  display: block;
+  padding: 10px;
+  font-family: var(--mono); font-size: .78rem; line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Wrapped rather than scrolled: the command is meant to be read before it is copied. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* One click selects the whole command for people who copy by hand. */
+  user-select: all;
+}
+.cli-copy-status { color: var(--status-good); }
+
+/* Region of interest ------------------------------------------------------- */
+
+.roi-field { margin-top: 4px; }
+.roi-stage {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  margin: 8px 0 6px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  /* Dragging a region should not select the surrounding copy. */
+  user-select: none;
+  touch-action: none;
+  cursor: crosshair;
+}
+.roi-canvas { display: block; max-width: 100%; max-height: 280px; width: auto; height: auto; }
+.roi-box {
+  position: absolute;
+  border: 2px solid var(--seq-400);
+  pointer-events: none;
+  /* The spread dims everything outside the region; the stage's overflow clips it. */
+  box-shadow: 0 0 0 4000px rgba(0, 0, 0, .42);
+}
+.roi-readout { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.roi-value { font-family: var(--mono); font-size: .78rem; color: var(--text-secondary); }

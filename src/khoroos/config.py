@@ -94,6 +94,10 @@ class AnalysisParams(BaseModel):
     #: Kalman filter, so this trades tracking precision for throughput.
     detection_stride: int = Field(2, ge=1)
     invalid_boxes: Literal["error", "drop"] = "error"
+    #: Analyse only this rectangle, as ``(x1, y1, x2, y2)`` fractions of width and height.
+    #: Fractions rather than pixels so one setting survives a change of recording
+    #: resolution. None analyses the whole frame.
+    roi: tuple[float, float, float, float] | None = None
     #: None uses Settings.behaviour_groups; an empty mapping disables grouping.
     behaviour_groups: dict[str, list[str]] | None = None
 
@@ -103,6 +107,27 @@ class AnalysisParams(BaseModel):
         if isinstance(value, str):
             value = json.loads(value)
         return validate_groups(value) if value is not None else None
+
+    @field_validator("roi", mode="before")
+    @classmethod
+    def parse_roi(cls, value):
+        # A CLI flag and an HTTP form both arrive as "x1,y1,x2,y2"; Python and JSON callers
+        # pass a sequence. Pure string and float work, so config stays free of numpy.
+        if value is None or value == "":
+            return None
+        if isinstance(value, str):
+            value = value.split(",")
+        if not isinstance(value, (list, tuple)) or len(value) != 4:
+            raise ValueError("roi must be four values: x1,y1,x2,y2")
+        try:
+            x1, y1, x2, y2 = (float(str(item).strip()) for item in value)
+        except (TypeError, ValueError):
+            raise ValueError("roi values must be numbers") from None
+        if not all(0.0 <= item <= 1.0 for item in (x1, y1, x2, y2)):
+            raise ValueError("roi values are fractions of the frame and must be within 0 and 1")
+        if x1 >= x2 or y1 >= y2:
+            raise ValueError("roi must have x1 < x2 and y1 < y2")
+        return (x1, y1, x2, y2)
 
     # -- tracking ----------------------------------------------------------
     track_iou_threshold: float = Field(0.30, ge=0.0, le=1.0)
@@ -169,10 +194,11 @@ class AnalysisParams(BaseModel):
         return value
 
     def describe(self) -> str:
+        region = "" if self.roi is None else " roi=" + ",".join(f"{v:g}" for v in self.roi)
         return (
             f"conf={self.detection_confidence} stride={self.detection_stride} "
             f"window={self.window_seconds}s/{self.stride_seconds}s "
-            f"min_conf={self.min_confidence}"
+            f"min_conf={self.min_confidence}{region}"
         )
 
 
@@ -257,6 +283,10 @@ def _build[ModelT: BaseModel](model: type[ModelT], values: Mapping[str, Any], wh
 # ---------------------------------------------------------------------------
 
 
+#: One part of a device spec. ``all`` and ``cuda:all`` mean every GPU; see khoroos.devices.
+_DEVICE_SYNTAX = re.compile(r"auto|all|cpu|mps|cuda(?::(?:[0-9]+|all))?")
+
+
 def _default_cache_dir() -> Path:
     if xdg := os.environ.get("XDG_CACHE_HOME"):
         return Path(xdg) / "khoroos"
@@ -270,7 +300,8 @@ class Settings(BaseSettings):
         env_prefix="KHOROOS_", extra="ignore", validate_assignment=True
     )
 
-    #: ``cuda`` / ``cpu`` / ``mps``; ``auto`` picks the best available.
+    #: ``cuda`` / ``cpu`` / ``mps``; ``auto`` picks the best single device. Several devices
+    #: — ``all``, or a list like ``cuda:0,cuda:1`` — split each analysis across them.
     device: str = "auto"
     behaviour_groups: dict[str, list[str]] = Field(
         default_factory=lambda: {name: list(members) for name, members in BEHAVIOUR_GROUPS.items()}
@@ -279,9 +310,15 @@ class Settings(BaseSettings):
     @field_validator("device")
     @classmethod
     def validate_device(cls, value):
-        if value not in ("auto", "cpu", "mps") and not re.fullmatch(r"cuda(?::[0-9]+)?", value):
-            raise ValueError("device must be auto, cpu, mps, cuda, or cuda:<index>")
-        return value
+        # Syntax only: whether the hardware exists is a question for khoroos.devices, which
+        # needs torch. Settings must stay importable and checkable without it.
+        parts = [part.strip() for part in str(value).split(",")]
+        if not all(re.fullmatch(_DEVICE_SYNTAX, part) for part in parts):
+            raise ValueError(
+                "device must be auto, all, cpu, mps, cuda, cuda:<index>, or a comma-separated "
+                "list of those, e.g. cuda:0,cuda:1"
+            )
+        return ",".join(parts)
 
     @field_validator("behaviour_groups", mode="before")
     @classmethod
@@ -313,8 +350,10 @@ class Settings(BaseSettings):
     job_ttl_hours: float = 24.0
 
     def resolved_device(self) -> str:
-        if self.device != "auto":
-            return self.device
+        """The single device a model loads onto; the first, when several are configured."""
+        primary = self.device.split(",")[0]
+        if primary not in ("auto", "all"):
+            return primary
         import torch
 
         if torch.cuda.is_available():
@@ -322,6 +361,12 @@ class Settings(BaseSettings):
         if torch.backends.mps.is_available():
             return "mps"
         return "cpu"
+
+    def resolved_devices(self) -> list[str]:
+        """Every device a run uses, in order. More than one splits each batch across them."""
+        from khoroos.devices import resolve_devices
+
+        return resolve_devices(self.device)
 
     @property
     def jobs_dir(self) -> Path:

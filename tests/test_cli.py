@@ -248,3 +248,79 @@ def test_cli_device_override_does_not_mutate_global(cli, synthetic_video, tmp_pa
     result = cli.invoke(app, ["analyze", str(synthetic_video), "-o", str(tmp_path), "--device", "cpu"])
     assert result.exit_code == 0, result.output
     assert get_settings().device == original
+
+
+def test_unavailable_device_in_a_list_fails_before_the_runner_loads(synthetic_video, monkeypatch):
+    """Hardware is checked on the way in, not after minutes of weight loading."""
+    from khoroos.pipeline import runner as runner_module
+
+    def fail(**kwargs):
+        pytest.fail("Runner must not be constructed for an unavailable device")
+
+    monkeypatch.setattr(runner_module, "AnalysisRunner", fail)
+    result = runner.invoke(app, ["analyze", str(synthetic_video), "--device", "cpu,cuda:99999"])
+    assert result.exit_code == 2
+    assert "unavailable" in result.output
+
+
+def test_analysing_on_several_devices_reports_them_and_the_batch_split(
+    cli, synthetic_video, tmp_path, monkeypatch
+):
+    from khoroos import devices
+
+    monkeypatch.setattr(
+        devices,
+        "available_devices",
+        lambda: [{"id": "cpu", "label": "CPU"}]
+        + [{"id": f"cuda:{index}", "label": f"GPU {index}"} for index in range(2)],
+    )
+    result = cli.invoke(
+        app, ["analyze", str(synthetic_video), "-o", str(tmp_path), "--device", "all"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "on cuda:0, cuda:1" in result.output
+    assert "are totals" in result.output
+
+
+def test_device_help_mentions_using_several_gpus():
+    response = runner.invoke(app, ["analyze", "--help"])
+    assert response.exit_code == 0
+    assert "cuda:0,cuda:1" in response.output.replace("\n", "")
+
+
+def test_region_of_interest_reaches_the_analysis(cli, synthetic_video, tmp_path, monkeypatch):
+    from khoroos.pipeline import runner as runner_module
+
+    seen = {}
+    real = runner_module.AnalysisRunner
+
+    def capture(**kwargs):
+        built = real(**kwargs)
+        run = built.run
+
+        def wrapped(*args, **inner):
+            seen["roi"] = inner["params"].roi
+            return run(*args, **inner)
+
+        built.run = wrapped
+        return built
+
+    monkeypatch.setattr(runner_module, "AnalysisRunner", capture)
+    result = cli.invoke(
+        app,
+        ["analyze", str(synthetic_video), "-o", str(tmp_path), "--roi", "0.1,0.25,0.8,0.9"],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["roi"] == (0.1, 0.25, 0.8, 0.9)
+
+
+def test_an_impossible_region_fails_before_the_models_load(synthetic_video, monkeypatch):
+    from khoroos.pipeline import runner as runner_module
+
+    def fail(**kwargs):
+        pytest.fail("Runner must not be constructed for an invalid region")
+
+    monkeypatch.setattr(runner_module, "AnalysisRunner", fail)
+    result = runner.invoke(app, ["analyze", str(synthetic_video), "--roi", "0.9,0.1,0.2,0.5"])
+    assert result.exit_code == 2
+    assert "roi" in result.output

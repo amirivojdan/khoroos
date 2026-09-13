@@ -31,7 +31,7 @@ def describe_environment(
     # Imported here so `khoroos.environment` stays importable from `khoroos/__init__`
     # without a cycle, and so importing this module does not drag in the model registry.
     from khoroos import __version__
-    from khoroos.devices import available_devices, resolve_device
+    from khoroos.devices import device_choices, resolve_devices
     from khoroos.interfaces import component_name
     from khoroos.models.metadata import checkpoint_classes
     from khoroos.models.registry import checkpoint_status
@@ -62,17 +62,24 @@ def describe_environment(
                 "source": "injected",
             }
 
+    choices = device_choices()
+    device = settings.resolved_device()
     default_device = settings.device
-    if default_device == "cuda":
-        # Keep an unavailable configured default visible rather than replacing it.
-        with suppress(ValueError):
-            default_device = resolve_device(default_device)
+    with suppress(ValueError):
+        # What the configured spec means right now: "cuda" and "all" name hardware only
+        # indirectly, and the UI reports the devices a run would actually use.
+        device = ",".join(resolve_devices(settings.device))
+        if default_device not in {choice["id"] for choice in choices} | {"auto"}:
+            # A spec the picker has no entry for — "cuda", or an explicit device list —
+            # preselects the devices it resolves to. An unavailable one stays visible as
+            # written rather than being silently replaced.
+            default_device = device
 
     return {
         "version": __version__,
-        "device": settings.resolved_device(),
+        "device": device,
         "default_device": default_device,
-        "devices": available_devices(),
+        "devices": choices,
         "presets": {name: dict(values) for name, values in PRESETS.items()},
         "default_preset": DEFAULT_PRESET,
         "classes": classes,

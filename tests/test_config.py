@@ -86,7 +86,9 @@ def test_invalid_action_class_lists_are_validation_errors(value):
         AnalysisParams(action_classes=value)
 
 
-@pytest.mark.parametrize("device", ["banana", "cuda:-1", "cuda:x", "cpu:2", ""])
+@pytest.mark.parametrize(
+    "device", ["banana", "cuda:-1", "cuda:x", "cpu:2", "", "cuda:0,banana", "cuda:0,,", ","]
+)
 def test_invalid_devices_rejected_at_creation_and_assignment(device):
     from khoroos.config import Settings
 
@@ -98,11 +100,22 @@ def test_invalid_devices_rejected_at_creation_and_assignment(device):
     assert settings.device == "cpu"
 
 
-@pytest.mark.parametrize("device", ["cpu", "auto", "mps", "cuda", "cuda:1"])
+@pytest.mark.parametrize(
+    "device", ["cpu", "auto", "mps", "cuda", "cuda:1", "all", "cuda:all", "cuda:0,cuda:1"]
+)
 def test_valid_device_syntax_without_loading_models(device):
     from khoroos.config import Settings
 
     assert Settings(device=device).device == device
+
+
+def test_a_device_list_is_normalised_and_reports_its_first_device():
+    """Model wrappers load onto one device; the list is the pipeline's business."""
+    from khoroos.config import Settings
+
+    assert Settings(device=" cuda:0 , cuda:1 ").device == "cuda:0,cuda:1"
+    assert Settings(device="cuda:0,cuda:1").resolved_device() == "cuda:0"
+    assert Settings(device="cpu").resolved_device() == "cpu"
 
 
 def test_settings_overrides_are_validated_copies():
@@ -125,3 +138,46 @@ def test_invalid_behavior_groups_rejected(groups):
 
 def test_group_overrides_parse_cli_json():
     assert AnalysisParams(behaviour_groups='{"activity":["moving"]}').behaviour_groups == {"activity": ["moving"]}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "0.1,0.2",                 # not four values
+        "0.1,0.2,0.3,0.4,0.5",
+        "0.1,0.2,0.3,1.5",         # outside the frame
+        "-0.1,0.2,0.3,0.4",
+        "0.8,0.2,0.3,0.9",         # x1 >= x2
+        "0.1,0.9,0.8,0.2",         # y1 >= y2
+        "0.1,0.1,0.1,0.9",         # zero width
+        "0.1,0.2,0.3,banana",
+        [0.1, 0.2, 0.3],
+    ],
+)
+def test_invalid_regions_of_interest_are_rejected(value):
+    from khoroos.config import AnalysisParams
+
+    with pytest.raises(ValueError, match="roi"):
+        AnalysisParams(roi=value)
+
+
+def test_a_region_of_interest_is_accepted_as_text_or_a_sequence():
+    """The CLI and an HTTP form send a string; Python and JSON callers send four numbers."""
+    from khoroos.config import AnalysisParams
+
+    expected = (0.1, 0.25, 0.8, 0.9)
+    assert AnalysisParams(roi="0.1,0.25,0.8,0.9").roi == expected
+    assert AnalysisParams(roi=" 0.1 , 0.25 ,0.8, 0.9 ").roi == expected
+    assert AnalysisParams(roi=[0.1, 0.25, 0.8, 0.9]).roi == expected
+    assert AnalysisParams(roi=(0, 0, 1, 1)).roi == (0.0, 0.0, 1.0, 1.0)
+    # No region at all, however it is spelled by a surface that left the field blank.
+    assert AnalysisParams().roi is None
+    assert AnalysisParams(roi=None).roi is None
+    assert AnalysisParams(roi="").roi is None
+
+
+def test_the_region_shows_up_in_the_parameter_summary():
+    from khoroos.config import AnalysisParams
+
+    assert "roi=" not in AnalysisParams().describe()
+    assert "roi=0.1,0.25,0.8,0.9" in AnalysisParams(roi="0.1,0.25,0.8,0.9").describe()

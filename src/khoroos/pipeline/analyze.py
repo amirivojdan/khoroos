@@ -9,13 +9,15 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Iterator
+from contextlib import ExitStack
 from pathlib import Path
+from types import TracebackType
+from typing import Any
 
 import numpy as np
 
 from khoroos.annotations import Detections
 from khoroos.config import (
-    UNCERTAIN_LABEL,
     AnalysisParams,
     Settings,
     get_settings,
@@ -24,6 +26,7 @@ from khoroos.config import (
 from khoroos.interfaces import Detector, VideoClassifier, VideoReader, component_name, model_card
 from khoroos.models.card import per_class_f1, per_class_support
 from khoroos.models.selection import SelectedClasses
+from khoroos.pipeline.classification import classify_batch
 from khoroos.pipeline.components import PipelineComponents
 from khoroos.pipeline.types import (
     ActionPrediction,
@@ -89,25 +92,58 @@ class VideoAnalyzer:
     @property
     def detector(self) -> Detector:
         if self._detector is None:
-            from khoroos.models.detector import ChickenDetector
+            from khoroos.models.parallel import build_detector
 
-            self._detector = ChickenDetector(settings=self.settings)
+            self._detector = build_detector(self.settings)
         return self._detector
 
     @property
     def recognizer(self) -> VideoClassifier:
         if self._recognizer is None:
-            from khoroos.models.action import ActionRecognizer
+            from khoroos.models.parallel import build_recognizer
 
-            self._recognizer = ActionRecognizer(settings=self.settings)
+            self._recognizer = build_recognizer(self.settings)
         return self._recognizer
 
-    def describe_environment(self) -> dict:
-        """Describe this composition using injected models or local checkpoint metadata."""
+    def close(self) -> None:
+        """Drop loaded models and the device worker threads a multi-device model holds.
+
+        The analyzer reloads on next use, so this is about releasing hardware promptly —
+        the web worker calls it before loading the same models onto a different device.
+        """
+        models = (self._detector, self._recognizer)
+        self._detector = self._recognizer = None
+        # Attempt both cleanups even if a custom component raises. Detaching first also
+        # makes a repeated close harmless after a partially failed cleanup.
+        with ExitStack() as cleanup:
+            for model in reversed(models):
+                close = getattr(model, "close", None)
+                if close is not None:
+                    cleanup.callback(close)
+
+    def __enter__(self) -> VideoAnalyzer:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
+
+    def describe_environment(self, *, settings: Settings | None = None) -> dict[str, Any]:
+        """Describe models without loading them, optionally using presentation settings.
+
+        A web application can supply its configured device default while retaining metadata
+        from this analyzer's injected components. Neither settings object is mutated.
+        """
         from khoroos.environment import describe_environment
 
         return describe_environment(
-            self.settings, classifier=self._recognizer, detector=self._detector
+            settings if settings is not None else self.settings,
+            classifier=self._recognizer,
+            detector=self._detector,
         )
 
     # -- main entry points -------------------------------------------------
@@ -155,7 +191,7 @@ class VideoAnalyzer:
         should_cancel: Callable[[], bool] | None,
     ) -> Iterator[ProgressEvent | AnalysisResult]:
         """Coordinate stages for an open source; iter_analyze owns its lifetime."""
-        started = time.time()
+        started = time.perf_counter()
         warnings: list[str] = []
 
         def check_cancel() -> None:
@@ -201,10 +237,14 @@ class VideoAnalyzer:
         tracker = self.components.tracker_factory(params)
         frame_counts: list[tuple[float, int]] = []
         dropped_boxes = 0
+        # The detector still sees the whole frame at the scale it was trained on; the region
+        # decides which of its findings are ours.
+        region = None if params.roi is None else roi_pixels(params.roi, info.width, info.height)
+        outside_region = 0
 
         total_detect_frames = max(1, len(range(0, limit, params.detection_stride)))
         done = 0
-        detect_started = time.time()
+        detect_started = time.perf_counter()
 
         yield progress("detect", 0.0, "Detecting birds")
         for indices, frames in source.iter_batches(
@@ -223,12 +263,16 @@ class VideoAnalyzer:
                 detected = Detections.coerce(raw, invalid_boxes=params.invalid_boxes)
                 dropped_boxes += detected.dropped_count
                 boxes, scores = detected
+                if region is not None:
+                    keep = inside_roi(boxes, region)
+                    outside_region += int((~keep).sum())
+                    boxes, scores = boxes[keep], scores[keep]
                 t = source.time_of(frame_index)
                 frame_counts.append((t, len(boxes)))
                 tracker.update(frame_index, t, boxes, scores)
 
             done += len(indices)
-            elapsed = time.time() - detect_started
+            elapsed = time.perf_counter() - detect_started
             rate = done / elapsed if elapsed > 0 else 0.0
             eta = (total_detect_frames - done) / rate if rate > 0 else None
             yield progress(
@@ -243,6 +287,18 @@ class VideoAnalyzer:
 
         if dropped_boxes:
             warnings.append(f"Dropped {dropped_boxes} invalid detection boxes.")
+        if region is not None:
+            kept = sum(count for _, count in frame_counts)
+            if not kept:
+                warnings.append(
+                    "No detections fell inside the region of interest; check that it covers "
+                    "the part of the frame the birds are in."
+                )
+            else:
+                warnings.append(
+                    f"Region of interest kept {kept} detections and ignored {outside_region} "
+                    "outside it."
+                )
 
         yield progress("track", 0.5, "Linking detections into tracks")
         tracks: list[Track] = tracker.finalize()
@@ -292,42 +348,26 @@ class VideoAnalyzer:
             recognizer = selected or SelectedClasses(self.recognizer)
             classes = list(recognizer.classes)
             batch_size = params.action_batch_size
-            classify_started = time.time()
+            classify_started = time.perf_counter()
 
             yield progress("classify", 0.0, "Recognising actions")
             for start in range(0, len(tracklets), batch_size):
                 check_cancel()
-                batch = tracklets[start : start + batch_size]
-                clips = []
-                kept: list[Tracklet] = []
-                saved_raw = []
-                clip_indices = []
-                for offset, tracklet in enumerate(batch):
-                    check_cancel()
-                    clip = self.components.clip_extractor(
-                        source, tracklet, target_frames=recognizer.num_frames
+                predictions.extend(
+                    classify_batch(
+                        source,
+                        tracklets[start : start + batch_size],
+                        recognizer,
+                        start_index=start,
+                        min_confidence=params.min_confidence,
+                        extract_clip=self.components.clip_extractor,
+                        exporter=tracklet_exporter,
+                        check_cancel=check_cancel,
                     )
-                    if clip is not None and clip.shape[0] > 0:
-                        clips.append(clip)
-                        kept.append(tracklet)
-                        index = start + offset
-                        clip_indices.append(index)
-                        saved_raw.append(tracklet_exporter.save("raw", index, tracklet, clip))
-
-                if clips:
-                    probs = recognizer.classify(clips)
-                    for index, tracklet, clip, raw_path, row in zip(
-                        clip_indices, kept, clips, saved_raw, probs, strict=True
-                    ):
-                        check_cancel()
-                        prediction = _to_prediction(tracklet, row, classes, params.min_confidence)
-                        predictions.append(prediction)
-                        tracklet_exporter.save(
-                            "classified", index, tracklet, clip, prediction, raw_path
-                        )
+                )
 
                 done_clips = min(start + batch_size, len(tracklets))
-                elapsed = time.time() - classify_started
+                elapsed = time.perf_counter() - classify_started
                 rate = done_clips / elapsed if elapsed > 0 else 0.0
                 eta = (len(tracklets) - done_clips) / rate if rate > 0 else None
                 yield progress(
@@ -353,11 +393,12 @@ class VideoAnalyzer:
             per_class_support={k: v for k, v in per_class_support(card).items() if k in classes},
         )
 
-        groups = (
+        configured_groups = (
             self.settings.behaviour_groups
             if params.behaviour_groups is None
             else params.behaviour_groups
         )
+        groups = {name: list(members) for name, members in configured_groups.items()}
         metrics = self.components.metrics(
             predictions,
             analyzed_info,
@@ -385,11 +426,32 @@ class VideoAnalyzer:
             metrics=metrics,
             warnings=warnings,
             frame_counts=frame_counts,
-            runtime_seconds=time.time() - started,
+            runtime_seconds=time.perf_counter() - started,
         )
 
         yield progress("metrics", 1.0, "Done")
         yield result
+
+
+def roi_pixels(roi: tuple[float, float, float, float], width: int, height: int):
+    """Turn fractional ``(x1, y1, x2, y2)`` into pixel bounds for a frame of this size."""
+    x1, y1, x2, y2 = roi
+    return (x1 * width, y1 * height, x2 * width, y2 * height)
+
+
+def inside_roi(boxes: np.ndarray, bounds) -> np.ndarray:
+    """Mask of boxes whose centre lies within ``bounds``.
+
+    Centre-inside rather than any-overlap: a bird on the boundary belongs to whichever side
+    it is mostly on, and its membership does not flicker as the box grows and shrinks
+    between frames — which it would if a single overlapping pixel were enough.
+    """
+    if len(boxes) == 0:
+        return np.zeros(0, dtype=bool)
+    x1, y1, x2, y2 = bounds
+    centres_x = (boxes[:, 0] + boxes[:, 2]) / 2.0
+    centres_y = (boxes[:, 1] + boxes[:, 3]) / 2.0
+    return (centres_x >= x1) & (centres_x <= x2) & (centres_y >= y1) & (centres_y <= y2)
 
 
 def _pick_bin_seconds(duration: float) -> float:
@@ -401,34 +463,6 @@ def _pick_bin_seconds(duration: float) -> float:
     if duration <= 3600:
         return 30.0
     return 60.0
-
-
-def _to_prediction(
-    tracklet: Tracklet,
-    probabilities: np.ndarray,
-    classes: list[str],
-    min_confidence: float,
-) -> ActionPrediction:
-    best = int(np.argmax(probabilities))
-    confidence = float(probabilities[best])
-    label = classes[best]
-    uncertain = confidence < min_confidence
-
-    # Representative box for the window: the middle frame, where the bird is most likely
-    # to be centred in its own crop.
-    mid = len(tracklet.boxes) // 2
-    box = tuple(float(v) for v in tracklet.boxes[mid])
-
-    return ActionPrediction(
-        track_id=tracklet.track_id,
-        start_seconds=tracklet.start_seconds,
-        end_seconds=tracklet.end_seconds,
-        label=UNCERTAIN_LABEL if uncertain else label,
-        confidence=confidence,
-        probabilities={c: float(p) for c, p in zip(classes, probabilities, strict=True)},
-        box=box,  # type: ignore[arg-type]
-        is_uncertain=uncertain,
-    )
 
 
 def analyze_video(

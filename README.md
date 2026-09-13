@@ -82,7 +82,8 @@ khoroos analyze farm.mp4 -o results/ --set action_classes=feeding,drinking
 ```
 
 Choose `--preset fast`, `balanced` (default), or `thorough` to adjust sampling detail.
-If GPU memory runs out, reduce `--action-batch-size` first. See the
+With more than one GPU, `--device all` splits each analysis across them; batch sizes stay
+totals across the devices. If GPU memory runs out, reduce `--action-batch-size` first. See the
 [CLI guide](https://github.com/amirivojdan/khoroos/blob/main/docs/guide/command-line.md) for all options.
 
 ## Python

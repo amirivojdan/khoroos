@@ -93,11 +93,33 @@ class StubRecognizer:
 
 
 @pytest.fixture
-def stub_analyzer():
-    """A :class:`VideoAnalyzer` wired to stub models."""
+def make_stub_analyzer():
+    """Build independent :class:`VideoAnalyzer` instances wired to stub models.
+
+    A test comparing two runs needs one analyzer each: the stubs count the calls they have
+    seen and move their boxes accordingly, so a second run through the same instance would
+    start where the first left off rather than reproducing it.
+
+    Pinned to the CPU so the job manager sees the same device the tests ask jobs to run
+    on. Left at the default ``auto``, an injected runner on a machine with a GPU would
+    look like a runner that has to be moved before a ``cpu`` job could use it.
+    """
+    from khoroos.config import get_settings
     from khoroos.pipeline.analyze import VideoAnalyzer
 
-    return VideoAnalyzer(detector=StubDetector(), recognizer=StubRecognizer())
+    def build():
+        return VideoAnalyzer(
+            settings=get_settings().with_overrides(device="cpu"),
+            detector=StubDetector(),
+            recognizer=StubRecognizer(),
+        )
+
+    return build
+
+
+@pytest.fixture
+def stub_analyzer(make_stub_analyzer):
+    return make_stub_analyzer()
 
 
 @pytest.fixture

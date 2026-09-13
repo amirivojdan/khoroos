@@ -81,6 +81,25 @@ The container runs as UID/GID `10001:10001`. Bind-mounted inputs must be readabl
 if you mount an output or cache directory yourself, it must also be writable by that user.
 The example above uses the managed volume for writes.
 
+## Using several GPUs
+
+The compose service already requests `gpus: all`, so every GPU the NVIDIA Container Toolkit
+exposes is visible inside the container, indexed from zero locally. `KHOROOS_DEVICE` decides
+how many are used: the shipped default `cuda` runs on one. To split each analysis across all
+of them, set
+
+```yaml
+    environment:
+      KHOROOS_DEVICE: all
+```
+
+or pick **All N GPUs** per job in the web interface. Batch sizes stay totals across the
+devices — see [using several GPUs](configuration.md#using-several-gpus).
+
+To expose only some of the host's GPUs, restrict them at the container boundary
+(`gpus: '"device=0,1"'`) rather than by index inside Khoroos: container indices are local
+and will not match the host's.
+
 ## Authentication and startup options
 
 Authentication is optional for the default public models. For private replacement models,

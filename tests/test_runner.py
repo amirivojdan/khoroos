@@ -93,3 +93,16 @@ def test_cancellation_stops_the_run(stub_runner, synthetic_video, tmp_path, quic
             params=quick_params,
             should_cancel=lambda: True,
         )
+
+
+def test_runner_context_releases_models_after_export_failure(
+    stub_runner, synthetic_video, tmp_path, quick_params
+):
+    closed = []
+    stub_runner.analyzer.detector.close = lambda: closed.append("detector")
+    stub_runner.analyzer.recognizer.close = lambda: closed.append("recognizer")
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory")
+    with pytest.raises(OSError), stub_runner as active:
+        active.run(synthetic_video, output_dir=blocked, params=quick_params)
+    assert closed == ["detector", "recognizer"]

@@ -142,6 +142,12 @@ from khoroos.web.app import create_app
 app = create_app(runner=runner)
 ```
 
+The ASGI application lifespan starts and stops the job worker. In tests, use
+`with TestClient(app)` before accessing `app.state.jobs`. An injected runner is borrowed:
+the application does not close it, so its caller owns cleanup. Environment descriptions
+use `analyzer.describe_environment()` and do not load model weights; a keyword-only
+`settings=` override can adjust displayed defaults without mutating the analyzer.
+
 The built-in web visualizations and download routes expect the standard metrics and export
 keys. Additional custom outputs are available through the Python runner; custom UI views
 and download routes are application code.

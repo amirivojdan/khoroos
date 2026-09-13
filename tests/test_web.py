@@ -25,7 +25,22 @@ def client(tmp_path, monkeypatch):
     app = create_app(settings)
     with TestClient(app) as test_client:
         yield test_client
-    app.state.jobs.close()
+
+
+def test_app_lifespan_owns_worker_without_owning_injected_runner(tmp_path, stub_runner, monkeypatch):
+    from khoroos.web.app import create_app
+
+    settings = Settings(cache_dir=tmp_path / "cache", device="cpu")
+    closed = []
+    monkeypatch.setattr(stub_runner, "close", lambda: closed.append(True))
+    app = create_app(settings, runner=stub_runner)
+    assert not settings.jobs_dir.exists()
+    assert not hasattr(app.state, "jobs")
+    with TestClient(app):
+        manager = app.state.jobs
+        assert manager._worker.is_alive()
+    assert not manager._worker.is_alive()
+    assert closed == []
 
 
 @pytest.fixture
@@ -72,7 +87,33 @@ def test_device_selection_is_retained_and_used(stub_client, synthetic_video):
     assert status["device"] == "cpu"
 
 
-@pytest.mark.parametrize("device", ["banana", "cuda:999999", "cuda:-1"])
+def test_a_multi_device_selection_is_recorded_as_the_devices_it_resolves_to(
+    stub_client, synthetic_video, monkeypatch
+):
+    """Picking "all GPUs" must record the devices it meant, so a job says where it ran."""
+    from khoroos import devices
+
+    monkeypatch.setattr(
+        devices,
+        "available_devices",
+        lambda: [{"id": "cpu", "label": "CPU"}]
+        + [{"id": f"cuda:{index}", "label": f"GPU {index}"} for index in range(2)],
+    )
+
+    payload = stub_client.get("/api/config").json()
+    assert {"id": "all", "label": "All 2 GPUs — split each video"} in payload["devices"]
+
+    # Cancelled straight away: the point is what the API resolved, not running on a GPU
+    # this test machine may not have.
+    response = stub_client.post("/api/jobs", data={
+        "server_path": str(synthetic_video), "device": "all",
+    })
+    assert response.status_code == 200
+    assert response.json()["device"] == "cuda:0,cuda:1"
+    stub_client.app.state.jobs.cancel(response.json()["job_id"])
+
+
+@pytest.mark.parametrize("device", ["banana", "cuda:999999", "cuda:-1", "cpu,banana"])
 def test_invalid_device_rejected_before_upload(client, device):
     response = client.post("/api/jobs", data={"device": device}, files={
         "file": ("farm.mp4", b"not consumed", "video/mp4"),
@@ -97,8 +138,76 @@ def test_static_index_is_served(client):
     assert "Khoroos" in response.text
     assert 'class="player-stage"' in response.text
     assert 'id="player-overlay"' in response.text
-    assert "styles.css?v=devices-1" in response.text
-    assert "app.js?v=devices-1" in response.text
+    assert "styles.css?v=roi-1" in response.text
+    assert "app.js?v=roi-2" in response.text
+
+
+def test_a_region_of_interest_is_accepted_and_recorded(stub_client, synthetic_video):
+    job_id = stub_client.post("/api/jobs", data={
+        "server_path": str(synthetic_video), "roi": "0.1,0.25,0.8,0.9",
+    }).json()["job_id"]
+    status = wait_for(stub_client, job_id, {"completed", "failed"})
+    assert status["state"] == "completed", status.get("error")
+    result = stub_client.get(f"/api/jobs/{job_id}/result").json()
+    assert result["params"]["roi"] == [0.1, 0.25, 0.8, 0.9]
+
+
+@pytest.mark.parametrize("roi", ["0.1,0.2", "0.9,0.1,0.2,0.5", "0,0,2,1", "a,b,c,d"])
+def test_an_invalid_region_is_rejected_before_the_upload(client, roi):
+    response = client.post("/api/jobs", data={"roi": roi}, files={
+        "file": ("farm.mp4", b"not consumed", "video/mp4"),
+    })
+    assert response.status_code == 400
+    assert "roi" in response.json()["detail"]
+    assert client.app.state.jobs.list_jobs() == []
+
+
+def test_the_region_picker_is_on_the_options_screen(client):
+    page = client.get("/").text
+    assert 'id="roi-canvas"' in page
+    assert 'id="roi-clear"' in page
+
+
+def test_the_command_line_echo_is_on_the_options_screen(client):
+    page = client.get("/").text
+    assert 'id="cli-command"' in page
+    assert 'id="copy-cli"' in page
+
+
+def test_the_echoed_command_only_uses_options_the_cli_actually_has():
+    """The printed command is built in the browser, so nothing stops it drifting.
+
+    This pins the two lists it is built from to the real CLI: a renamed flag or a dropped
+    parameter fails here rather than handing someone a command that does not run.
+    """
+    import re
+    from pathlib import Path
+
+    import typer.main
+
+    import khoroos.web
+    from khoroos.cli import app as cli_app
+    from khoroos.config import AnalysisParams
+
+    script = (Path(khoroos.web.__file__).parent / "static" / "app.js").read_text()
+
+    def names(constant: str) -> list[str]:
+        match = re.search(rf"const {constant} = \[(.*?)\];", script, re.S)
+        assert match, f"{constant} is no longer declared in app.js"
+        return re.findall(r"'([a-z_]+)'", match.group(1))
+
+    flags, set_params = names("CLI_FLAGS"), names("CLI_SET_PARAMS")
+    assert flags and set_params
+
+    analyze = typer.main.get_command(cli_app).commands["analyze"]
+    options = {name for param in analyze.params for name in param.opts}
+    for field in flags:
+        assert f"--{field.replace('_', '-')}" in options, field
+
+    # `--set` reaches these by name, so the name has to be one the model accepts.
+    assert "--set" in options
+    for field in set_params:
+        assert field in AnalysisParams.model_fields, field
 
 
 def test_select_screen_uses_a_single_video_dropzone(client):

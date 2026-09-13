@@ -252,3 +252,70 @@ def test_overlay_video_is_playable(stub_analyzer, synthetic_video, tmp_path):
     with VideoSource(output) as source:
         assert source.num_frames > 0
         assert (source.width, source.height) == (640, 480)
+
+
+# ---------------------------------------------------------------------------
+# Region of interest
+# ---------------------------------------------------------------------------
+#
+# The stub detector puts one bird around x=135 and another around x=435 of a 640px frame,
+# both centred near y=225 of 480, so a region can separate them by construction.
+
+
+def test_roi_keeps_only_the_birds_centred_inside(make_stub_analyzer, synthetic_video):
+    whole = make_stub_analyzer().analyze(
+        synthetic_video, params=params_for_preset("balanced", detection_stride=1)
+    )
+    left = make_stub_analyzer().analyze(
+        synthetic_video,
+        params=params_for_preset("balanced", detection_stride=1, roi="0,0,0.45,1"),
+    )
+
+    assert len(whole.tracks) == 2
+    assert len(left.tracks) == 1, "only the bird centred in the left of the frame survives"
+    assert left.metrics["population"]["mean"] < whole.metrics["population"]["mean"]
+    assert any("Region of interest kept" in warning for warning in left.warnings)
+
+
+def test_a_roi_holding_no_birds_says_so_rather_than_failing(stub_analyzer, synthetic_video):
+    """An empty region is a mistake worth reporting, not a crash and not a silent zero."""
+    result = stub_analyzer.analyze(
+        synthetic_video,
+        params=params_for_preset("balanced", detection_stride=1, roi="0,0,1,0.2"),
+    )
+    assert result.tracks == []
+    assert result.predictions == []
+    assert any("No detections fell inside" in warning for warning in result.warnings)
+
+
+def test_the_roi_is_recorded_with_the_result(stub_analyzer, synthetic_video):
+    """Results have to say which region produced them, or they cannot be compared."""
+    result = stub_analyzer.analyze(
+        synthetic_video,
+        params=params_for_preset("fast", roi=[0.1, 0.25, 0.8, 0.9]),
+    )
+    assert result.params["roi"] == (0.1, 0.25, 0.8, 0.9)
+    assert json.loads(json.dumps(result.to_dict()))["params"]["roi"] == [0.1, 0.25, 0.8, 0.9]
+
+
+def test_membership_is_decided_by_the_box_centre():
+    """Centre-inside keeps a bird's membership stable as its box grows and shrinks."""
+    import numpy as np
+
+    from khoroos.pipeline.analyze import inside_roi, roi_pixels
+
+    bounds = roi_pixels((0.25, 0.25, 0.75, 0.75), 640, 480)
+    assert bounds == (160.0, 120.0, 480.0, 360.0)
+
+    boxes = np.array(
+        [
+            [300, 220, 340, 260],  # wholly inside
+            [10, 10, 50, 50],  # wholly outside
+            [100, 60, 140, 100],  # overlaps nothing, centre well outside
+            [150, 110, 170, 130],  # centre exactly on the boundary
+            [0, 0, 320, 240],  # straddles the edge, centre inside
+        ],
+        dtype=np.float32,
+    )
+    assert inside_roi(boxes, bounds).tolist() == [True, False, False, True, True]
+    assert inside_roi(np.zeros((0, 4), dtype=np.float32), bounds).shape == (0,)

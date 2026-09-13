@@ -57,9 +57,7 @@ def get_config(request: Request) -> dict[str, Any]:
         # Preserve injected metadata while keeping defaults independent of previous jobs.
         analyzer = runner.analyzer
         settings = analyzer.settings.with_overrides(device=request.app.state.settings.device)
-        return describe_environment(
-            settings, classifier=analyzer._recognizer, detector=analyzer._detector
-        )
+        return analyzer.describe_environment(settings=settings)
     return describe_environment(request.app.state.settings)
 
 
@@ -153,6 +151,7 @@ async def create_job(
     action_classes: str | None = Form(None),
     behaviour_groups: str | None = Form(None),
     invalid_boxes: str | None = Form(None),
+    roi: str | None = Form(None),
     render_overlay: bool = Form(False),
     save_raw_tracklets: bool = Form(False),
     raw_tracklets_dir: str | None = Form(None),
@@ -166,10 +165,11 @@ async def create_job(
     if file is None and not server_path:
         raise HTTPException(status_code=400, detail="Provide either a file upload or server_path.")
 
-    from khoroos.devices import resolve_device
+    from khoroos.devices import resolve_devices
 
     try:
-        selected_device = resolve_device(device if device is not None else settings.device)
+        requested = device if device is not None else settings.device
+        selected_device = ",".join(resolve_devices(requested))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -186,6 +186,7 @@ async def create_job(
             "action_classes": action_classes,
             "behaviour_groups": behaviour_groups,
             "invalid_boxes": invalid_boxes,
+            "roi": roi,
             "raw_tracklets_dir": _tracklet_directory(
                 save_raw_tracklets, raw_tracklets_dir, settings.cache_dir / "tracklets" / "raw"
             ),

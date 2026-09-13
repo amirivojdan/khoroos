@@ -13,7 +13,16 @@ khoroos analyze farm.mp4 --output results/
 khoroos analyze farm.mp4 --output results/ --preset thorough --overlay
 khoroos analyze farm.mp4 --output results/ --max-seconds 300
 khoroos analyze farm.mp4 --device cuda --detection-batch-size 32 --action-batch-size 8
+khoroos analyze farm.mp4 --device all --detection-batch-size 32
+khoroos analyze farm.mp4 --roi 0.1,0.25,0.8,0.9
 ```
+
+`--roi` restricts the analysis to a rectangle, given as `x1,y1,x2,y2` in 0-1 fractions
+of the frame. See [region of interest](configuration.md#region-of-interest).
+
+`--device` takes one device, `auto`, `all`, or a list such as `cuda:0,cuda:1`. More than
+one device splits every batch across them, so the batch-size options stay totals. See
+[using several GPUs](configuration.md#using-several-gpus).
 
 The `--overlay` option writes an annotated video in addition to the data exports. It is not
 needed for the browser visualization, which draws tracks and behaviour labels live.

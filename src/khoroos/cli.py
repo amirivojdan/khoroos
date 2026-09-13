@@ -76,6 +76,15 @@ def analyze(
             "dominates memory use.",
         ),
     ] = None,
+    roi: Annotated[
+        str | None,
+        typer.Option(
+            "--roi",
+            metavar="X1,Y1,X2,Y2",
+            help="Analyse only this rectangle, as 0-1 fractions of the frame, e.g. "
+            "0.1,0.25,0.8,0.9. Birds whose centre falls outside it are ignored.",
+        ),
+    ] = None,
     overlay: Annotated[
         bool, typer.Option("--overlay/--no-overlay", help="Render an annotated video.")
     ] = False,
@@ -88,7 +97,14 @@ def analyze(
             help="Override any analysis parameter, e.g. -s window_seconds=3. Repeatable.",
         ),
     ] = None,
-    device: Annotated[str | None, typer.Option("--device", help="cuda, cpu, mps or auto.")] = None,
+    device: Annotated[
+        str | None,
+        typer.Option(
+            "--device",
+            help="cuda, cpu, mps, auto, all, or a list like cuda:0,cuda:1 to split the "
+            "work across several GPUs.",
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Analyse a video and write results to a directory."""
@@ -109,6 +125,7 @@ def analyze(
             "detection_confidence": detection_confidence,
             "detection_batch_size": detection_batch_size,
             "action_batch_size": action_batch_size,
+            "roi": roi,
         }
         overrides.update(parse_overrides(set_param or []))
         params = params_for_preset(preset, **overrides)
@@ -118,7 +135,18 @@ def analyze(
 
     from khoroos.pipeline.runner import AnalysisRunner
 
-    typer.echo(f"Analysing {video} [{preset}] on {settings.resolved_device()}")
+    try:
+        selected = settings.resolved_devices()
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
+
+    typer.echo(f"Analysing {video} [{preset}] on {', '.join(selected)}")
+    if len(selected) > 1:
+        typer.echo(
+            "  Batches are split across these devices, so --detection-batch-size and "
+            "--action-batch-size are totals."
+        )
 
     with typer.progressbar(length=1000, label="starting") as bar:
         position = 0
@@ -133,13 +161,14 @@ def analyze(
             bar.label = event.stage
             bar.update(step)
 
-        artifacts = AnalysisRunner(settings=settings).run(
-            video,
-            output_dir=output,
-            params=params,
-            render_overlay=overlay,
-            on_progress=on_progress,
-        )
+        with AnalysisRunner(settings=settings) as analysis_runner:
+            artifacts = analysis_runner.run(
+                video,
+                output_dir=output,
+                params=params,
+                render_overlay=overlay,
+                on_progress=on_progress,
+            )
 
     _print_summary(artifacts.result)
     typer.echo("\nWrote:")
@@ -179,7 +208,14 @@ def ui(
     no_browser: Annotated[
         bool, typer.Option("--no-browser", help="Do not open a browser.")
     ] = False,
-    device: Annotated[str | None, typer.Option("--device", help="cuda, cpu, mps or auto.")] = None,
+    device: Annotated[
+        str | None,
+        typer.Option(
+            "--device",
+            help="cuda, cpu, mps, auto, all, or a list like cuda:0,cuda:1 to split the "
+            "work across several GPUs.",
+        ),
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Launch the web interface."""
@@ -216,10 +252,7 @@ def ui(
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
 
     web_app = create_app(settings)
-    try:
-        uvicorn.run(web_app, host=settings.host, port=settings.port, log_level="info")
-    finally:
-        web_app.state.jobs.close()
+    uvicorn.run(web_app, host=settings.host, port=settings.port, log_level="info")
 
 
 @models_app.command("status")
@@ -267,6 +300,7 @@ def info(
 
     typer.secho(f"Khoroos {env['version']}", bold=True)
     typer.echo(f"  device      {env['device']}")
+    typer.echo(f"  configured  {env['default_device']}")
     typer.echo(f"  cache       {env['cache_dir']}")
 
     typer.echo("\n  Presets:")

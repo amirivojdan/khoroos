@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+from types import TracebackType
 
 from khoroos.config import AnalysisParams, Settings, get_settings
 from khoroos.pipeline.analyze import VideoAnalyzer
@@ -122,6 +123,21 @@ class AnalysisRunner:
             )
 
         return artifacts
+
+    def close(self) -> None:
+        """Release the loaded models. The runner reloads them on its next run."""
+        self.analyzer.close()
+
+    def __enter__(self) -> AnalysisRunner:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        self.close()
 
     def _export(
         self,

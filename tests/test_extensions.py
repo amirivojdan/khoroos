@@ -299,3 +299,56 @@ def test_pipeline_without_result_raises_explicit_error(custom_pipeline):
     analyzer.iter_analyze = lambda *args, **kwargs: iter(())
     with pytest.raises(RuntimeError, match="without producing a result"):
         analyzer.analyze("memory")
+
+
+def test_result_groups_do_not_alias_nested_settings(custom_pipeline):
+    analyzer, _, _ = custom_pipeline
+    analyzer.settings = analyzer.settings.with_overrides(behaviour_groups={"activity": ["moving"]})
+    result = analyzer.analyze("memory")
+    analyzer.settings.behaviour_groups["activity"].append("sleeping")
+    assert result.params["behaviour_groups"] == {"activity": ["moving"]}
+    result.params["behaviour_groups"]["activity"].append("eating")
+    assert analyzer.settings.behaviour_groups == {"activity": ["moving", "sleeping"]}
+
+
+def test_metadata_override_does_not_load_models_or_mutate_settings(tmp_path, monkeypatch):
+    from khoroos import Settings
+
+    analyzer = VideoAnalyzer(settings=Settings(cache_dir=tmp_path, device="cpu"))
+
+    def fail(*args, **kwargs):
+        pytest.fail("Describing composition must not build a model")
+
+    monkeypatch.setattr("khoroos.models.parallel.build_detector", fail)
+    monkeypatch.setattr("khoroos.models.parallel.build_recognizer", fail)
+    displayed = analyzer.settings.with_overrides(device="cuda:999999")
+    assert analyzer.describe_environment(settings=displayed)["default_device"] == "cuda:999999"
+    assert analyzer.settings.device == "cpu"
+
+
+def test_analyzer_context_closes_models_on_failure(custom_pipeline):
+    analyzer, _, _ = custom_pipeline
+    closed = []
+    analyzer.detector.close = lambda: closed.append("detector")
+    analyzer.recognizer.close = lambda: closed.append("recognizer")
+    with pytest.raises(RuntimeError, match="caller failed"), analyzer as active:
+        assert active is analyzer
+        raise RuntimeError("caller failed")
+    analyzer.close()
+    assert closed == ["detector", "recognizer"]
+
+
+def test_analyzer_attempts_all_component_cleanup_when_one_close_fails(custom_pipeline):
+    analyzer, _, _ = custom_pipeline
+    closed = []
+
+    def fail():
+        closed.append("detector")
+        raise RuntimeError("detector cleanup failed")
+
+    analyzer.detector.close = fail
+    analyzer.recognizer.close = lambda: closed.append("recognizer")
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        analyzer.close()
+    analyzer.close()
+    assert closed == ["detector", "recognizer"]

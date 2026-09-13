@@ -39,19 +39,24 @@ worker. Reusing one runner also reuses the loaded model weights:
 ```python
 from khoroos import AnalysisRunner, params_for_preset
 
-runner = AnalysisRunner()
 params = params_for_preset("balanced")
 
-for video in ("monday.mp4", "tuesday.mp4"):
-    artifacts = runner.run(
-        video,
-        output_dir=f"results/{video}",
-        params=params,
-        render_overlay=False,
-        on_progress=lambda event: print(event.stage, f"{event.progress:.0%}"),
-    )
-    print(artifacts.paths)
+with AnalysisRunner() as runner:
+    for video in ("monday.mp4", "tuesday.mp4"):
+        artifacts = runner.run(
+            video,
+            output_dir=f"results/{video}",
+            params=params,
+            render_overlay=False,
+            on_progress=lambda event: print(event.stage, f"{event.progress:.0%}"),
+        )
+        print(artifacts.paths)
 ```
+
+The context closes loaded models and their worker threads, including on failure.
+`VideoAnalyzer` supports the same pattern. For manually managed instances, call `close()`
+when finished. Explicit cleanup also closes injected models, so coordinate it with any
+other code sharing those objects; an analyzer and its runner are intended for sequential use.
 
 ## Cancel long-running work
 

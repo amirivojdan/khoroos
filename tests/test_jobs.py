@@ -119,7 +119,7 @@ def test_jobs_reuse_runner_and_release_models_before_device_switch(
     from khoroos import devices
     from khoroos.pipeline import runner
 
-    monkeypatch.setattr(devices, "resolve_device", lambda device: device)
+    monkeypatch.setattr(devices, "resolve_devices", lambda device: device.split(","))
     released = []
     monkeypatch.setattr(torch.mps, "empty_cache", lambda: released.append("mps"))
     monkeypatch.setattr(torch.cuda, "device", lambda device: nullcontext())
@@ -178,7 +178,7 @@ def test_unavailable_device_at_execution_marks_job_failed(manager, tmp_path, mon
     def unavailable(device):
         raise ValueError("Device became unavailable")
 
-    monkeypatch.setattr(devices, "resolve_device", unavailable)
+    monkeypatch.setattr(devices, "resolve_devices", unavailable)
     manager._process(job)
     assert job.state == JobState.FAILED
     assert "unavailable" in job.error
@@ -188,10 +188,150 @@ def test_unavailable_device_at_execution_marks_job_failed(manager, tmp_path, mon
 def test_injected_runner_is_not_replaced_on_device_switch(manager, stub_runner, monkeypatch):
     from khoroos import devices
 
-    monkeypatch.setattr(devices, "resolve_device", lambda device: device)
+    monkeypatch.setattr(devices, "resolve_devices", lambda device: device.split(","))
     stub_runner.settings = stub_runner.settings.with_overrides(device="cpu")
     manager.runner = stub_runner
     manager._prepare_runner("cpu")
     with pytest.raises(ValueError, match="injected runner"):
         manager._prepare_runner("mps")
     assert manager.runner is stub_runner
+
+
+def test_a_multi_device_job_keeps_its_devices_and_releases_every_one(manager, tmp_path, monkeypatch):
+    """A job may name several devices; the run splits across them and frees them all."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    import torch
+
+    from khoroos import devices
+    from khoroos.pipeline import runner
+
+    monkeypatch.setattr(devices, "resolve_devices", lambda device: device.split(","))
+    emptied: list[str] = []
+
+    @contextmanager
+    def selected(device):
+        emptied.append(device)
+        yield
+
+    monkeypatch.setattr(torch.cuda, "device", selected)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    constructed: list[str] = []
+    closed: list[str] = []
+
+    class RecordingRunner:
+        def __init__(self, settings):
+            self.settings = settings
+            constructed.append(settings.device)
+
+        def run(self, *args, **kwargs):
+            return SimpleNamespace(result=None, overlay=None, export_error=None)
+
+        def close(self):
+            closed.append(self.settings.device)
+
+    monkeypatch.setattr(runner, "AnalysisRunner", RecordingRunner)
+
+    both = manager.create_job(
+        tmp_path / "v.mp4", "v.mp4", AnalysisParams(), device="cuda:0,cuda:1"
+    )
+    assert both.device == "cuda:0,cuda:1"
+    assert both.status_dict()["device"] == "cuda:0,cuda:1"
+    manager._process(both)
+    assert both.state == JobState.COMPLETED, both.error
+
+    # The same pair of devices reuses the loaded models rather than reloading them.
+    again = manager.create_job(
+        tmp_path / "v.mp4", "v.mp4", AnalysisParams(), device="cuda:0,cuda:1"
+    )
+    manager._process(again)
+    assert constructed == ["cuda:0,cuda:1"]
+
+    # Moving to one device releases the models and empties the cache of *both* GPUs.
+    one = manager.create_job(tmp_path / "v.mp4", "v.mp4", AnalysisParams(), device="cuda:1")
+    manager._process(one)
+    assert constructed == ["cuda:0,cuda:1", "cuda:1"]
+    assert closed == ["cuda:0,cuda:1"]
+    assert emptied == ["cuda:0", "cuda:1"]
+
+
+def test_shutdown_waits_for_inference_before_releasing_owned_models(tmp_path, monkeypatch):
+    import threading
+
+    from khoroos.pipeline import runner
+    from khoroos.pipeline.analyze import CancelledError
+
+    started, finish, released = threading.Event(), threading.Event(), threading.Event()
+    release_threads = []
+
+    class BlockingRunner:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def run(self, *args, should_cancel, **kwargs):
+            started.set()
+            assert finish.wait(5)
+            assert should_cancel()
+            raise CancelledError("Stopped")
+
+        def close(self):
+            release_threads.append(threading.current_thread())
+            released.set()
+
+    monkeypatch.setattr(runner, "AnalysisRunner", BlockingRunner)
+    manager = JobManager(Settings(cache_dir=tmp_path, device="cpu"))
+    try:
+        job = manager.create_job(tmp_path / "video.mp4", "video.mp4", AnalysisParams())
+        assert started.wait(5)
+        manager.close(timeout=0)
+        assert manager._worker.is_alive()
+        assert not released.is_set(), "A timed-out close must not release models still in use"
+    finally:
+        finish.set()
+        manager.close()
+    assert not manager._worker.is_alive()
+    assert released.is_set()
+    assert release_threads == [manager._worker]
+    assert manager.runner is None
+    assert job.state == JobState.CANCELLED
+
+
+def test_job_admission_rechecks_shutdown_after_device_resolution(manager, tmp_path, monkeypatch):
+    from khoroos import devices
+
+    def close_during_resolution(spec):
+        manager.close()
+        return ["cpu"]
+
+    monkeypatch.setattr(devices, "resolve_devices", close_during_resolution)
+    with pytest.raises(RuntimeError, match="closed"):
+        manager.create_job(tmp_path / "video.mp4", "video.mp4", AnalysisParams())
+    assert manager.list_jobs() == []
+
+
+def test_worker_can_request_shutdown_without_joining_itself(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from khoroos.pipeline import runner
+
+    class CallbackRunner:
+        def __init__(self, settings):
+            self.settings = settings
+
+        def run(self, *args, **kwargs):
+            manager.close()
+            return SimpleNamespace(result=None, overlay=None, export_error=None)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(runner, "AnalysisRunner", CallbackRunner)
+    manager = JobManager(Settings(cache_dir=tmp_path, device="cpu"))
+    try:
+        job = manager.create_job(tmp_path / "video.mp4", "video.mp4", AnalysisParams())
+        manager._worker.join(timeout=5)
+        assert not manager._worker.is_alive()
+        assert job.state == JobState.COMPLETED, job.error
+    finally:
+        manager.close()
